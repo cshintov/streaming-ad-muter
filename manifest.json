@@ -22,7 +22,7 @@
     "48": "icon.png",
     "96": "icon.png"
   },
-  "applications": {
+  "browser_specific_settings": {
     "gecko": {
       "id": "hotstar-ad-muter@devopsbytes.com",
       "update_url": "https://devopsbytes.com/addons/firefox/hotstar-ad-muter/update.json"
