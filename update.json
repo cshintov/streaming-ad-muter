@@ -1,0 +1,12 @@
+{
+  "addons": {
+    "hotstar-ad-muter@devopsbytes.com": {
+      "updates": [
+        {
+          "version": "1.0",
+          "update_link": "https://devopsbytes.com/addons/firefox/hotstar-ad-muter/hotstar_ad_muter-1.0.xpi"
+        }
+      ]
+    }
+  }
+}
