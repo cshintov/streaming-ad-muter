@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      width: 300px;
+      padding: 16px;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    .status {
+      margin-bottom: 16px;
+      padding: 8px;
+      border-radius: 4px;
+      background: #f0f0f0;
+    }
+    .enabled {
+      color: #22c55e;
+    }
+    .details {
+      font-size: 14px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="status">
+    <h3 class="enabled">Ad Muting Active</h3>
+    <p>Monitoring Hotstar for ad requests</p>
+  </div>
+  <div class="details">
+    <p>This extension automatically mutes your tab when ads are detected on Hotstar.</p>
+    <p>The tab will automatically unmute when:</p>
+    <ul>
+      <li>The ad finishes playing (30s timeout)</li>
+      <li>You navigate away from Hotstar</li>
+      <li>You close the tab</li>
+    </ul>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

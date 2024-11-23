@@ -1,0 +1,25 @@
+{
+  "manifest_version": 2,
+  "name": "Hotstar Ad Muter",
+  "version": "1.0",
+  "description": "Mutes Hotstar tabs when ads are detected",
+  "permissions": [
+    "webRequest",
+    "webRequestBlocking",
+    "<all_urls>",
+    "tabs",
+    "storage"
+  ],
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": true
+  },
+  "browser_action": {
+    "default_title": "Hotstar Ad Muter",
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "48": "icon.png",
+    "96": "icon.png"
+  }
+}
