@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
-  "name": "Hotstar Ad Muter",
+  "name": "Streaming Ad Muter",
   "version": "1.0",
-  "description": "Mutes Hotstar tabs when ads are detected",
+  "description": "Automatically mutes ads on Hotstar and SonyLIV",
   "permissions": [
     "webRequest",
     "webRequestBlocking",
@@ -15,7 +15,7 @@
     "persistent": true
   },
   "browser_action": {
-    "default_title": "Hotstar Ad Muter",
+    "default_title": "Streaming Ad Muter",
     "default_popup": "popup.html"
   },
   "icons": {

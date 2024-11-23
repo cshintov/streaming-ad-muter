@@ -1,3 +1,14 @@
+import { HOTSTAR_PATTERNS } from './providers/hotstar.js';
+import { SONYLIV_PATTERNS } from './providers/sonyliv.js';
+
+// Determine which provider we're on
+const domain = window.location.hostname;
+const adIndicators = domain.includes('hotstar.com') 
+  ? HOTSTAR_PATTERNS.DOM_SELECTORS
+  : domain.includes('sonyliv.com')
+    ? SONYLIV_PATTERNS.DOM_SELECTORS
+    : [];
+
 // Observe DOM changes to detect when ads start/end
 const adObserver = new MutationObserver((mutations) => {
   for (const mutation of mutations) {
@@ -6,14 +17,6 @@ const adObserver = new MutationObserver((mutations) => {
 });
 
 function checkForAd() {
-  // Common ad indicators in Hotstar's player
-  const adIndicators = [
-    '.ad-overlay',
-    '.ad-container',
-    '[data-text="Advertisement"]',
-    '.ad-unit'
-  ];
-
   const isAdPlaying = adIndicators.some(selector => 
     document.querySelector(selector) !== null
   );
