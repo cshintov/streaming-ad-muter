@@ -15,8 +15,18 @@ function logHotstarEvent(tabId, event, details = {}) {
 }
 
 // Debug logging helper for SonyLIV
+function getISTTime() {
+  return new Date().toLocaleString('en-US', { 
+    timeZone: 'Asia/Kolkata',
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+}
+
 function logSonyLivEvent(tabId, event, details = {}) {
-  const timestamp = new Date().toISOString();
+  const timestamp = getISTTime();
   console.log(`[SonyLIV ${timestamp}] Tab ${tabId}: ${event}`, {
     timestamp,
     tabId,
@@ -38,15 +48,18 @@ const SONYLIV_PATTERNS = {
     "securepubads.g.doubleclick.net/pcs/view",
     "pubads.g.doubleclick.net/pagead/interaction"
   ],
-  CONTENT_RESUME: "sprite.sonyliv.com/Img"
+  CONTENT_RESUME: "drm.sonyliv.com"
 };
 
 // Helper functions
 async function handleTabMuting(tabId, shouldMute, isCricketAd = false) {
   try {
+    console.log(`[Debug] Handling tab muting:`, { tabId, shouldMute, isCricketAd });
     const tab = await browser.tabs.get(tabId);
+    console.log(`[Debug] Current tab state:`, { muted: tab.mutedInfo.muted });
     
     if (shouldMute && !tab.mutedInfo.muted) {
+      console.log(`[Debug] Muting tab ${tabId}`);
       originalVolumes[tabId] = tab.mutedInfo.muted;
       await browser.tabs.update(tabId, { muted: true });
       
@@ -60,7 +73,8 @@ async function handleTabMuting(tabId, shouldMute, isCricketAd = false) {
           delete adTimeouts[tabId];
         }, 30000);
       }
-    } else if (!shouldMute && originalVolumes[tabId] !== undefined) {
+    } else if (!shouldMute) {  
+      console.log(`[Debug] Unmuting tab ${tabId}`);
       await browser.tabs.update(tabId, { muted: false });
       delete originalVolumes[tabId];
       if (adTimeouts[tabId]) {
@@ -81,13 +95,19 @@ browser.webRequest.onBeforeRequest.addListener(
     const url = details.url.toLowerCase();
     const domain = new URL(details.url).hostname;
     
-    // Route to appropriate handler based on domain
-    if (domain.includes('hotstar.com')) {
-      return handleHotstarRequest(url, details.tabId, handleTabMuting);
+    // Check if this is a SonyLIV tab first
+    const tabs = await browser.tabs.query({active: true, currentWindow: true});
+    const currentTab = tabs.find(tab => tab.id === details.tabId);
+    const isSonyLivTab = currentTab && new URL(currentTab.url).hostname.includes('sonyliv.com');
+    
+    // Handle SonyLIV ad detection for any domain if we're on a SonyLIV tab
+    if (isSonyLivTab) {
+      return handleSonyLivRequest(url, details.tabId, handleTabMuting);
     }
     
-    if (domain.includes('sonyliv.com')) {
-      return handleSonyLivRequest(url, details.tabId, handleTabMuting);
+    // Handle Hotstar normally
+    if (domain.includes('hotstar.com')) {
+      return handleHotstarRequest(url, details.tabId, handleTabMuting);
     }
   },
   { urls: ["<all_urls>"] }
@@ -174,5 +194,41 @@ function handleHotstarRequest(url, tabId, handleTabMuting) {
       matched: false,
       reason: 'Contains Hotstar tracking keywords but doesn\'t match patterns'
     });
+  }
+}
+
+// Track last pubads request time per tab
+const lastPubAdsTime = {};
+
+function handleSonyLivRequest(url, tabId, handleTabMuting) {
+  // Track pubads.g requests
+  if (url.includes('pubads.g.doubleclick.net')) {
+    lastPubAdsTime[tabId] = Date.now();
+    return;
+  }
+  
+  // Check for drm request following a recent pubads request
+  if (url.includes(SONYLIV_PATTERNS.CONTENT_RESUME)) {
+    const timeSinceLastPubAds = Date.now() - (lastPubAdsTime[tabId] || 0);
+    console.log(`[SonyLIV ${getISTTime()}] DRM request:`, {
+      timeSinceLastPubAds: timeSinceLastPubAds + 'ms',
+      adState: adStates[tabId]
+    });
+    
+    // If we see drm request within 2 seconds of pubads request
+    if (timeSinceLastPubAds < 2000 && adStates[tabId] === 'ad') {
+      adStates[tabId] = 'content';
+      console.log(`[SonyLIV ${getISTTime()}] 🟢 Content Resume (pubads->drm)`);
+      delete originalVolumes[tabId];
+      return handleTabMuting(tabId, false);
+    }
+  }
+  
+  // Check for ad start
+  const matchedAdPattern = SONYLIV_PATTERNS.AD_START.find(pattern => url.includes(pattern.toLowerCase()));
+  if (matchedAdPattern && adStates[tabId] !== 'ad') {
+    adStates[tabId] = 'ad';
+    console.log(`[SonyLIV ${getISTTime()}] 🔴 Ad Start`);
+    return handleTabMuting(tabId, true, false);
   }
 }
