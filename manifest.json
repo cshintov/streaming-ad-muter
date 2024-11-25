@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Streaming Ad Muter",
-  "version": "1.0",
+  "version": "1.1",
   "description": "Automatically mutes ads on Hotstar and SonyLIV",
   "permissions": [
     "webRequest",
@@ -24,8 +24,7 @@
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "hotstar-ad-muter@devopsbytes.com",
-      "update_url": "https://devopsbytes.com/addons/firefox/hotstar-ad-muter/update.json"
+      "id": "streaming-ad-muter@devopsbytes.com"
     }
   }
 }
