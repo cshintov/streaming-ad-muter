@@ -1,21 +1,25 @@
-// Constants
-const HOTSTAR_PATTERNS = {
-  AD_START: "bifrost-api.hotstar.com/v1/events/track/shifu_impression",
-  CRICKET_AD_START: "bifrost-api.hotstar.com/v1/events/track/ct_impression",
-  AD_COMPLETE: "bifrost-api.hotstar.com/v1/events/track/shifu_quartile_q100",
-  CRICKET_VIDEO: "hssportsprepack.akamaized.net/videos/cricket"
-};
-
-// State management
-const originalVolumes = {};
-const adTimeouts = {};
-
-// Helper functions
-function parseHotstarAdBreakInfo(url) {
-  const params = new URLSearchParams(url.split('?')[1]);
-  return {
-    adDuration: params.has('ad_duration') ? parseInt(params.get('ad_duration')) / 1000 : null
-  };
+async function handleBlackout(tabId, shouldShow) {
+  try {
+    await chrome.tabs.sendMessage(tabId, {
+      type: 'VOLUME_ACTION',
+      shouldMute: shouldShow
+    });
+    console.log(`Blackout ${shouldShow ? 'shown' : 'hidden'} for tab ${tabId}`);
+  } catch (error) {
+    console.error('Error handling blackout:', error);
+    
+    // If content script isn't ready, inject it
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['content.js']
+    });
+    
+    // Try sending message again
+    await chrome.tabs.sendMessage(tabId, {
+      type: 'VOLUME_ACTION',
+      shouldMute: shouldShow
+    });
+  }
 }
 
 async function handleTabMuting(tabId, shouldMute) {
@@ -23,79 +27,53 @@ async function handleTabMuting(tabId, shouldMute) {
     const tab = await chrome.tabs.get(tabId);
     
     if (shouldMute && !tab.mutedInfo.muted) {
-      originalVolumes[tabId] = tab.mutedInfo.muted;
       await chrome.tabs.update(tabId, { muted: true });
-    } else if (!shouldMute) {  
+      await handleBlackout(tabId, true);
+    } else if (!shouldMute) {
       await chrome.tabs.update(tabId, { muted: false });
-      delete originalVolumes[tabId];
-      if (adTimeouts[tabId]) {
-        clearTimeout(adTimeouts[tabId]);
-        delete adTimeouts[tabId];
-      }
+      await handleBlackout(tabId, false);
     }
   } catch (error) {
-    console.error('Error handling tab muting:', error);
+    console.error('Error handling muting:', error);
   }
 }
 
-// Request handler
+function parseHotstarAdBreakInfo(url) {
+  const params = new URLSearchParams(url.split('?')[1]);
+  return {
+    adDuration: params.has('ad_duration') ? parseInt(params.get('ad_duration')) / 1000 : null
+  };
+}
+
 function handleHotstarRequest(url, tabId) {
-  if (url.includes(HOTSTAR_PATTERNS.CRICKET_VIDEO)) {
-    return handleTabMuting(tabId, false);
-  }
-  
-  if (url.includes(HOTSTAR_PATTERNS.AD_START)) {
+  if (url.includes('bifrost-api.hotstar.com/v1/events/track/shifu_impression')) {
     const breakInfo = parseHotstarAdBreakInfo(url);
     handleTabMuting(tabId, true);
 
-    if (breakInfo.adDuration > 0) {
-      if (adTimeouts[tabId]) {
-        clearTimeout(adTimeouts[tabId]);
-      }
-      adTimeouts[tabId] = setTimeout(async () => {
-        await handleTabMuting(tabId, false);
-        delete adTimeouts[tabId];
-      }, breakInfo.adDuration * 1000);
+    if (breakInfo.adDuration) {
+      setTimeout(() => handleTabMuting(tabId, false), breakInfo.adDuration * 1000);
     }
   }
 
-  if (url.includes(HOTSTAR_PATTERNS.AD_COMPLETE)) {
-    return handleTabMuting(tabId, false);
+  if (url.includes('bifrost-api.hotstar.com/v1/events/track/shifu_quartile_q100')) {
+    handleTabMuting(tabId, false);
   }
 }
 
-// Main request listener
 chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
     if (details.tabId === -1) return;
     
     const url = details.url.toLowerCase();
-    const domain = new URL(details.url).hostname;
-    
-    if (domain.includes('hotstar.com')) {
+    if (url.includes('hotstar.com')) {
       handleHotstarRequest(url, details.tabId);
     }
   },
   { urls: ["<all_urls>"] }
 );
 
-// Cleanup listeners
-chrome.tabs.onRemoved.addListener((tabId) => {
-  if (adTimeouts[tabId]) {
-    clearTimeout(adTimeouts[tabId]);
-    delete adTimeouts[tabId];
-  }
-  delete originalVolumes[tabId];
-});
-
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.url) {
-    if (adTimeouts[tabId]) {
-      clearTimeout(adTimeouts[tabId]);
-      delete adTimeouts[tabId];
-    }
-    if (originalVolumes[tabId]) {
-      handleTabMuting(tabId, false);
-    }
+    handleTabMuting(tabId, false);
   }
 });

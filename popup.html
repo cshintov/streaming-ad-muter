@@ -17,17 +17,71 @@
     .enabled {
       color: #4CAF50;
     }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 60px;
+      height: 34px;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #ccc;
+      transition: .4s;
+      border-radius: 34px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 26px;
+      width: 26px;
+      left: 4px;
+      bottom: 4px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+    }
+    input:checked + .slider {
+      background-color: #4CAF50;
+    }
+    input:checked + .slider:before {
+      transform: translateX(26px);
+    }
+    .option {
+      margin: 15px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
   </style>
 </head>
 <body>
   <h2>Streaming Ad Muter</h2>
   <div class="status">
     <p>Status: <span class="enabled">Active</span></p>
+    <div class="option">
+      <span>Blackout during ads:</span>
+      <label class="switch">
+        <input type="checkbox" id="blackoutToggle">
+        <span class="slider"></span>
+      </label>
+    </div>
     <p>Supported platforms:</p>
     <ul>
       <li>Hotstar</li>
+      <li>SonyLIV</li>
     </ul>
   </div>
-  <p>Ads will be automatically muted.</p>
+  <p>Ads will be automatically muted on supported streaming platforms.</p>
+  <script src="popup.js"></script>
 </body>
 </html>
