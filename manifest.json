@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Streaming Ad Muter",
+  "version": "1.2",
+  "description": "Automatically mutes ads on Hotstar",
+  "permissions": [
+    "webRequest",
+    "tabs"
+  ],
+  "host_permissions": [
+    "*://*.hotstar.com/*",
+    "*://*.bifrost-api.hotstar.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Streaming Ad Muter",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "128": "icon_128.png"
+    }
+  },
+  "icons": {
+    "128": "icon_128.png"
+  }
+}

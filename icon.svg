@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Background -->
+  <rect width="128" height="128" fill="#1A365D" rx="16"/>
+  
+  <!-- Speaker icon -->
+  <path d="M35 48v32h16l24 24V24L51 48H35z" fill="#FFFFFF"/>
+  
+  <!-- Mute symbol -->
+  <g stroke="#FF4444" stroke-width="6">
+    <line x1="88" y1="40" x2="108" y2="88"/>
+    <line x1="108" y1="40" x2="88" y2="88"/>
+  </g>
+</svg>

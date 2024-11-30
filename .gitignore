@@ -1,0 +1,5 @@
+# Build output
+extension.zip
+
+# System files
+.DS_Store
