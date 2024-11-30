@@ -2,7 +2,7 @@ let overlay = null;
 let countdownInterval = null;
 let isBlackoutEnabled = true;
 
-// Load initial blackout preference
+// Load blackout preference 
 chrome.storage.sync.get(['blackoutEnabled'], (result) => {
   isBlackoutEnabled = result.blackoutEnabled !== false;
 });
@@ -50,24 +50,32 @@ function createOverlay() {
 }
 
 function updateCountdown(duration) {
-  if (countdownInterval) clearInterval(countdownInterval);
+  if (countdownInterval) {
+    clearInterval(countdownInterval);
+    countdownInterval = null;
+  }
   
   if (!duration) return;
   
-  let remaining = Math.round(duration);
   const countdownElement = document.getElementById('countdown');
+  if (!countdownElement) return;
+  
+  let remaining = Math.round(duration);
+  countdownElement.textContent = `${remaining}s remaining`;
   
   countdownInterval = setInterval(() => {
+    remaining--;
     if (remaining <= 0) {
       clearInterval(countdownInterval);
+      countdownInterval = null;
+      overlay.style.display = 'none';
       return;
     }
     countdownElement.textContent = `${remaining}s remaining`;
-    remaining--;
   }, 1000);
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'VOLUME_ACTION') {
     if (!overlay) createOverlay();
     
@@ -82,3 +90,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
   }
 });
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', createOverlay);
+} else {
+  createOverlay();
+}
