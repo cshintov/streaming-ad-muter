@@ -22,7 +22,6 @@ async function handleBlackout(tabId, shouldShow, duration = null) {
 async function handleTabMuting(tabId, shouldMute, duration = null) {
   try {
     const tab = await chrome.tabs.get(tabId);
-    
     if (shouldMute && !tab.mutedInfo.muted) {
       await chrome.tabs.update(tabId, { muted: true });
       await handleBlackout(tabId, true, duration);

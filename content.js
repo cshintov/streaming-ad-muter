@@ -1,5 +1,21 @@
 let overlay = null;
 let countdownInterval = null;
+let isBlackoutEnabled = true;
+
+// Load initial blackout preference
+chrome.storage.sync.get(['blackoutEnabled'], (result) => {
+  isBlackoutEnabled = result.blackoutEnabled !== false;
+});
+
+// Listen for preference changes
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes.blackoutEnabled) {
+    isBlackoutEnabled = changes.blackoutEnabled.newValue;
+    if (!isBlackoutEnabled && overlay) {
+      overlay.style.display = 'none';
+    }
+  }
+});
 
 function createOverlay() {
   overlay = document.createElement('div');
@@ -52,12 +68,10 @@ function updateCountdown(duration) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('Content script received message:', message);
-  
   if (message.type === 'VOLUME_ACTION') {
     if (!overlay) createOverlay();
     
-    if (message.shouldMute) {
+    if (message.shouldMute && isBlackoutEnabled) {
       overlay.style.display = 'flex';
       updateCountdown(message.duration);
     } else {
@@ -68,9 +82,3 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
   }
 });
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', createOverlay);
-} else {
-  createOverlay();
-}
