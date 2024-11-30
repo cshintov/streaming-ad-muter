@@ -10,7 +10,10 @@
     "scripting"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "*://*.hotstar.com/*",
+    "*://*.sonyliv.com/*",
+    "*://*.akamaized.net/*",
+    "*://*.cdn.hotstar.com/*"
   ],
   "background": {
     "service_worker": "background.js"
