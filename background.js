@@ -1,34 +1,31 @@
-async function handleBlackout(tabId, shouldShow) {
+async function handleBlackout(tabId, shouldShow, duration = null) {
   try {
     await chrome.tabs.sendMessage(tabId, {
       type: 'VOLUME_ACTION',
-      shouldMute: shouldShow
+      shouldMute: shouldShow,
+      duration
     });
-    console.log(`Blackout ${shouldShow ? 'shown' : 'hidden'} for tab ${tabId}`);
   } catch (error) {
     console.error('Error handling blackout:', error);
-    
-    // If content script isn't ready, inject it
     await chrome.scripting.executeScript({
       target: { tabId },
       files: ['content.js']
     });
-    
-    // Try sending message again
     await chrome.tabs.sendMessage(tabId, {
       type: 'VOLUME_ACTION',
-      shouldMute: shouldShow
+      shouldMute: shouldShow,
+      duration
     });
   }
 }
 
-async function handleTabMuting(tabId, shouldMute) {
+async function handleTabMuting(tabId, shouldMute, duration = null) {
   try {
     const tab = await chrome.tabs.get(tabId);
     
     if (shouldMute && !tab.mutedInfo.muted) {
       await chrome.tabs.update(tabId, { muted: true });
-      await handleBlackout(tabId, true);
+      await handleBlackout(tabId, true, duration);
     } else if (!shouldMute) {
       await chrome.tabs.update(tabId, { muted: false });
       await handleBlackout(tabId, false);
@@ -48,7 +45,7 @@ function parseHotstarAdBreakInfo(url) {
 function handleHotstarRequest(url, tabId) {
   if (url.includes('bifrost-api.hotstar.com/v1/events/track/shifu_impression')) {
     const breakInfo = parseHotstarAdBreakInfo(url);
-    handleTabMuting(tabId, true);
+    handleTabMuting(tabId, true, breakInfo.adDuration);
 
     if (breakInfo.adDuration) {
       setTimeout(() => handleTabMuting(tabId, false), breakInfo.adDuration * 1000);
