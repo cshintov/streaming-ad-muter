@@ -1,6 +1,31 @@
+let DEBUG = false;
+
 function logAdEvent(message, data = {}) {
-  console.log(`[HotstarAdBlock] ${message}`, data);
+  if (!DEBUG) return;
+  const timestamp = new Date().toISOString().split('T')[1]; // Get time portion only
+  console.log(`[HotstarAdBlock ${timestamp}] ${message}`, data);
 }
+
+// Add debug state logging when extension starts
+logAdEvent('Extension initialized', {
+  debug: DEBUG,
+  version: chrome.runtime.getManifest().version
+});
+
+chrome.storage.local.get(['debug'], (result) => {
+  DEBUG = result.debug || false;
+  logAdEvent('Debug state loaded', { debug: DEBUG });
+});
+
+// Add a listener for debug toggle messages
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'TOGGLE_DEBUG') {
+    DEBUG = message.enabled;
+    chrome.storage.local.set({ debug: DEBUG });
+    logAdEvent('Debug state changed', { debug: DEBUG });
+    sendResponse({ debug: DEBUG });
+  }
+});
 
 async function handleBlackout(tabId, shouldShow, duration = null) {
   try {
