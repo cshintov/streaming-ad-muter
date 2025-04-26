@@ -3,3 +3,6 @@ extension.zip
 
 # System files
 .DS_Store
+
+# Force include docs folder
+!docs/
