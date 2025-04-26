@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Streaming Ad Muter",
-  "version": "1.3",
+  "version": "1.4",
   "description": "Automatically mutes ads on Hotstar and SonyLIV",
   "permissions": [
     "webRequest",
