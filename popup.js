@@ -15,6 +15,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         <p>Extension only works on hotstar.com</p>
       `;
     }
+
+    // Load debug setting
+    const result = await browser.storage.local.get(['debugEnabled']);
+    const debugToggle = document.getElementById('debugToggle');
+    debugToggle.checked = result.debugEnabled || false;
+
+    // Handle debug toggle
+    debugToggle.addEventListener('change', async (e) => {
+      await browser.storage.local.set({ debugEnabled: e.target.checked });
+      // Notify background script of debug state change
+      browser.runtime.sendMessage({ 
+        action: 'setDebug', 
+        enabled: e.target.checked 
+      });
+    });
+
   } catch (error) {
     console.error('Error updating popup:', error);
   }
