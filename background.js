@@ -392,10 +392,33 @@ browser.storage.local.get(['debugEnabled']).then((result) => {
   console.log('[AdMute] Startup test - Parsing result for sample ad:', testResult + 's');
 });
 
-// Listen for debug toggle messages from popup
+// Listen for messages from popup
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'setDebug') {
     debugEnabled = message.enabled;
     console.log('[AdMute] Debug logging', debugEnabled ? 'enabled' : 'disabled');
+  } else if (message.action === 'testAdDemo') {
+    // Simulate a full ad experience
+    const tabId = message.tabId;
+    console.log('[AdMute] 🧪 Testing ad demo on tab', tabId);
+    
+    // Simulate muting the tab
+    handleTabMuting(tabId, true).then(() => {
+      console.log('[AdMute] 🧪 Test: Tab muted');
+      
+      // Start countdown timer for 10 seconds
+      browser.tabs.sendMessage(tabId, { 
+        action: 'startCountdown', 
+        duration: 10 
+      }).catch(() => {});
+      
+      // Set timer to unmute after 10 seconds
+      setTimeout(async () => {
+        console.log('[AdMute] 🧪 Test: Unmuting after 10 seconds');
+        await handleTabMuting(tabId, false);
+        // Stop countdown timer
+        browser.tabs.sendMessage(tabId, { action: 'stopCountdown' }).catch(() => {});
+      }, 10000);
+    });
   }
 });

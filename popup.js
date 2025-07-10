@@ -31,6 +31,34 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
     });
 
+    // Handle test buttons
+    document.getElementById('testAdDemo').addEventListener('click', async () => {
+      try {
+        // Send test message to background script
+        await browser.runtime.sendMessage({ 
+          action: 'testAdDemo',
+          tabId: currentTab.id
+        });
+        // Close popup after triggering test
+        window.close();
+      } catch (error) {
+        console.error('Error triggering test:', error);
+      }
+    });
+
+    document.getElementById('testOverlayOnly').addEventListener('click', async () => {
+      try {
+        // Send message directly to content script to show overlay
+        await browser.tabs.sendMessage(currentTab.id, { 
+          action: 'showOverlay'
+        });
+        // Close popup after triggering test
+        window.close();
+      } catch (error) {
+        console.error('Error showing overlay:', error);
+      }
+    });
+
   } catch (error) {
     console.error('Error updating popup:', error);
   }

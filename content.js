@@ -1,6 +1,7 @@
-// Content script for countdown timer
+// Content script for countdown timer and overlay
 let countdownTimer = null;
 let countdownInterval = null;
+let adOverlay = null;
 
 // Create and inject countdown timer element
 function createCountdownTimer() {
@@ -50,6 +51,73 @@ function updateCountdown(seconds) {
   timeElement.textContent = `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
 }
 
+// Create and inject black overlay
+function createAdOverlay() {
+  // Remove existing overlay if any
+  const existing = document.getElementById('admute-overlay');
+  if (existing) {
+    existing.remove();
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'admute-overlay';
+  overlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0.9, 0.9, 0.9);
+    z-index: 9998;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(2px);
+    transition: opacity 0.3s ease;
+    cursor: pointer;
+  `;
+  
+  const centerContent = document.createElement('div');
+  centerContent.style.cssText = `
+    text-align: center;
+    color: white;
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 24px;
+    font-weight: 600;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    pointer-events: none;
+  `;
+  
+  centerContent.innerHTML = `
+    <div style="font-size: 48px; margin-bottom: 16px;">🔇</div>
+    <div>Ad is playing...</div>
+    <div style="font-size: 16px; margin-top: 8px; opacity: 0.8;">Audio muted</div>
+    <div style="font-size: 14px; margin-top: 12px; opacity: 0.6;">(Click to dismiss)</div>
+  `;
+  
+  overlay.appendChild(centerContent);
+  
+  // Allow clicks to dismiss overlay (for test mode)
+  overlay.addEventListener('click', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    hideOverlay();
+  });
+  
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function hideOverlay() {
+  const overlay = document.getElementById('admute-overlay');
+  if (overlay) {
+    overlay.style.opacity = '0';
+    setTimeout(() => {
+      overlay.remove();
+    }, 300);
+  }
+}
+
 function hideCountdown() {
   const timer = document.getElementById('admute-countdown');
   if (timer) {
@@ -63,11 +131,15 @@ function hideCountdown() {
     clearInterval(countdownInterval);
     countdownInterval = null;
   }
+  
+  // Also hide overlay when countdown ends
+  hideOverlay();
 }
 
 function startCountdown(durationSeconds) {
-  // Create timer element
+  // Create timer element and overlay
   createCountdownTimer();
+  createAdOverlay();
   
   let remainingSeconds = durationSeconds;
   updateCountdown(remainingSeconds);
@@ -94,10 +166,15 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     startCountdown(message.duration);
   } else if (message.action === 'stopCountdown') {
     hideCountdown();
+  } else if (message.action === 'showOverlay') {
+    createAdOverlay();
+  } else if (message.action === 'hideOverlay') {
+    hideOverlay();
   }
 });
 
 // Clean up on page unload
 window.addEventListener('beforeunload', () => {
   hideCountdown();
+  hideOverlay();
 });

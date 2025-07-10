@@ -1,0 +1,7 @@
+{
+  "version": {
+    "release_notes": {
+      "en-US": "Version 1.4 changelog:\n- Added black transparent overlay during ads for better visual feedback\n- Implemented click-to-dismiss functionality for overlay\n- Added test/demo buttons in popup for easier development and testing\n- Enhanced user experience with visual ad blocking indicators\n- Improved overlay opacity and design"
+    }
+  }
+}
