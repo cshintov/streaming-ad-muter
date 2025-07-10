@@ -16,10 +16,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       `;
     }
 
-    // Load debug setting
-    const result = await browser.storage.local.get(['debugEnabled']);
+    // Load settings
+    const result = await browser.storage.local.get(['debugEnabled', 'overlayMode']);
     const debugToggle = document.getElementById('debugToggle');
     debugToggle.checked = result.debugEnabled || false;
+    
+    // Load overlay mode setting
+    const overlayMode = result.overlayMode || 'educational';
+    document.getElementById(`mode${overlayMode.charAt(0).toUpperCase() + overlayMode.slice(1)}`).checked = true;
 
     // Handle debug toggle
     debugToggle.addEventListener('change', async (e) => {
@@ -28,6 +32,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       browser.runtime.sendMessage({ 
         action: 'setDebug', 
         enabled: e.target.checked 
+      });
+    });
+
+    // Handle overlay mode changes
+    document.querySelectorAll('input[name="overlayMode"]').forEach(radio => {
+      radio.addEventListener('change', async (e) => {
+        if (e.target.checked) {
+          await browser.storage.local.set({ overlayMode: e.target.value });
+          console.log('Overlay mode changed to:', e.target.value);
+        }
       });
     });
 

@@ -1,7 +1,7 @@
 {
   "version": {
     "release_notes": {
-      "en-US": "Version 1.4 changelog:\n- Added black transparent overlay during ads for better visual feedback\n- Implemented click-to-dismiss functionality for overlay\n- Added test/demo buttons in popup for easier development and testing\n- Enhanced user experience with visual ad blocking indicators\n- Improved overlay opacity and design"
+      "en-US": "Version 1.5 changelog:\n- Revolutionary educational overlay: Learn during ad breaks!\n- Multiple overlay modes: Educational, Simple Veil, or Minimal\n- Live API integration for fresh facts, tips, and inspiration\n- User preferences for personalized experience\n- Content categories: Fun Facts, Quick Tips, Number Trivia, Inspiration\n- 90/10 mix of API/static content for maximum variety"
     }
   }
 }

@@ -2,6 +2,61 @@
 let countdownTimer = null;
 let countdownInterval = null;
 let adOverlay = null;
+let contentCache = [];
+let currentContentIndex = 0;
+
+// Static content for offline/fallback
+const staticContent = [
+  { type: "💡 Did you know", content: "Honey never spoils. Archaeologists have found edible honey in ancient Egyptian tombs!" },
+  { type: "🧠 Quick Tip", content: "Press Ctrl+Shift+T to reopen the last closed browser tab." },
+  { type: "📚 Fun Fact", content: "Octopuses have three hearts and blue blood!" },
+  { type: "✨ Inspiration", content: "The only impossible journey is the one you never begin. - Tony Robbins" },
+  { type: "🔢 Number Trivia", content: "The number 4 is the only number with the same number of letters as its value." },
+  { type: "🧠 Quick Tip", content: "Double-click a word to select it instantly in most text editors." },
+  { type: "💡 Did you know", content: "A group of flamingos is called a 'flamboyance'!" },
+  { type: "📚 Fun Fact", content: "Bananas are berries, but strawberries aren't!" },
+  { type: "✨ Inspiration", content: "Success is not final, failure is not fatal: it is the courage to continue that counts. - Winston Churchill" },
+  { type: "🧠 Quick Tip", content: "Use Ctrl+L to quickly select the address bar in your browser." }
+];
+
+// Fetch content from APIs
+async function fetchRandomContent() {
+  const contentSources = [
+    {
+      url: 'https://asli-fun-fact-api.herokuapp.com/',
+      type: '📚 Fun Fact',
+      parser: (data) => data.data
+    },
+    {
+      url: 'http://numbersapi.com/random?json',
+      type: '🔢 Number Trivia', 
+      parser: (data) => data.text
+    }
+  ];
+
+  try {
+    const randomSource = contentSources[Math.floor(Math.random() * contentSources.length)];
+    const response = await fetch(randomSource.url);
+    const data = await response.json();
+    return {
+      type: randomSource.type,
+      content: randomSource.parser(data)
+    };
+  } catch (error) {
+    // Fallback to static content if API fails
+    return staticContent[Math.floor(Math.random() * staticContent.length)];
+  }
+}
+
+// Get next content item
+async function getNextContent() {
+  // Mix API content with static content
+  if (Math.random() < 0.9) { // 90% chance for API content
+    return await fetchRandomContent();
+  } else { // 10% chance for static content
+    return staticContent[Math.floor(Math.random() * staticContent.length)];
+  }
+}
 
 // Create and inject countdown timer element
 function createCountdownTimer() {
@@ -51,14 +106,8 @@ function updateCountdown(seconds) {
   timeElement.textContent = `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
 }
 
-// Create and inject black overlay
-function createAdOverlay() {
-  // Remove existing overlay if any
-  const existing = document.getElementById('admute-overlay');
-  if (existing) {
-    existing.remove();
-  }
-
+// Create simple veil overlay
+function createSimpleOverlay() {
   const overlay = document.createElement('div');
   overlay.id = 'admute-overlay';
   overlay.style.cssText = `
@@ -67,7 +116,7 @@ function createAdOverlay() {
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0, 0.9, 0.9, 0.9);
+    background: rgba(0, 0, 0, 0.9);
     z-index: 9998;
     display: flex;
     align-items: center;
@@ -82,22 +131,19 @@ function createAdOverlay() {
     text-align: center;
     color: white;
     font-family: system-ui, -apple-system, sans-serif;
-    font-size: 24px;
-    font-weight: 600;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
     pointer-events: none;
   `;
   
   centerContent.innerHTML = `
     <div style="font-size: 48px; margin-bottom: 16px;">🔇</div>
-    <div>Ad is playing...</div>
+    <div style="font-size: 24px; font-weight: 600;">Ad is playing...</div>
     <div style="font-size: 16px; margin-top: 8px; opacity: 0.8;">Audio muted</div>
     <div style="font-size: 14px; margin-top: 12px; opacity: 0.6;">(Click to dismiss)</div>
   `;
   
   overlay.appendChild(centerContent);
   
-  // Allow clicks to dismiss overlay (for test mode)
+  // Allow clicks to dismiss overlay
   overlay.addEventListener('click', (e) => {
     e.stopPropagation();
     e.preventDefault();
@@ -106,6 +152,110 @@ function createAdOverlay() {
   
   document.body.appendChild(overlay);
   return overlay;
+}
+
+// Create educational overlay with content
+async function createEducationalOverlay() {
+  const overlay = document.createElement('div');
+  overlay.id = 'admute-overlay';
+  overlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 9998;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(2px);
+    transition: opacity 0.3s ease;
+    cursor: pointer;
+  `;
+  
+  // Get random educational content
+  const contentItem = await getNextContent();
+  
+  const centerContent = document.createElement('div');
+  centerContent.style.cssText = `
+    max-width: 600px;
+    padding: 40px;
+    text-align: center;
+    color: white;
+    font-family: system-ui, -apple-system, sans-serif;
+    pointer-events: none;
+  `;
+  
+  centerContent.innerHTML = `
+    <div style="
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 32px;
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    ">
+      <div style="font-size: 32px; margin-bottom: 16px;">🔇</div>
+      <div style="font-size: 14px; opacity: 0.7; margin-bottom: 24px;">Ad is playing - Audio muted</div>
+      
+      <div style="
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 20px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      ">
+        <div style="
+          font-size: 18px;
+          font-weight: 600;
+          margin-bottom: 12px;
+          color: #ffd700;
+        ">${contentItem.type}</div>
+        <div style="
+          font-size: 16px;
+          line-height: 1.5;
+          font-weight: 400;
+        ">${contentItem.content}</div>
+      </div>
+      
+      <div style="font-size: 12px; opacity: 0.5;">(Click anywhere to dismiss)</div>
+    </div>
+  `;
+  
+  overlay.appendChild(centerContent);
+  
+  // Allow clicks to dismiss overlay
+  overlay.addEventListener('click', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    hideOverlay();
+  });
+  
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+// Create overlay based on user preference
+async function createAdOverlay() {
+  // Remove existing overlay if any
+  const existing = document.getElementById('admute-overlay');
+  if (existing) {
+    existing.remove();
+  }
+
+  // Get user preference
+  const result = await browser.storage.local.get(['overlayMode']);
+  const overlayMode = result.overlayMode || 'educational';
+  
+  if (overlayMode === 'simple') {
+    return createSimpleOverlay();
+  } else if (overlayMode === 'educational') {
+    return await createEducationalOverlay();
+  } else if (overlayMode === 'minimal') {
+    // Don't create overlay for minimal mode
+    return null;
+  }
 }
 
 function hideOverlay() {
@@ -136,10 +286,12 @@ function hideCountdown() {
   hideOverlay();
 }
 
-function startCountdown(durationSeconds) {
-  // Create timer element and overlay
+async function startCountdown(durationSeconds) {
+  // Create timer element
   createCountdownTimer();
-  createAdOverlay();
+  
+  // Create overlay based on user preference (may be null for minimal mode)
+  await createAdOverlay();
   
   let remainingSeconds = durationSeconds;
   updateCountdown(remainingSeconds);
@@ -161,13 +313,13 @@ function startCountdown(durationSeconds) {
 }
 
 // Listen for messages from background script
-browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
   if (message.action === 'startCountdown') {
-    startCountdown(message.duration);
+    await startCountdown(message.duration);
   } else if (message.action === 'stopCountdown') {
     hideCountdown();
   } else if (message.action === 'showOverlay') {
-    createAdOverlay();
+    await createAdOverlay();
   } else if (message.action === 'hideOverlay') {
     hideOverlay();
   }
