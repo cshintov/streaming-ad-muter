@@ -9,6 +9,18 @@
         {
           "version": "1.3",
           "update_link": "https://devopsbytes.com/addons/firefox/streaming-ad-muter/streaming_ad_muter-1.3.xpi"
+        },
+        {
+          "version": "1.4",
+          "update_link": "https://devopsbytes.com/addons/firefox/streaming-ad-muter/streaming_ad_muter-1.4.xpi"
+        },
+        {
+          "version": "1.5",
+          "update_link": "https://devopsbytes.com/addons/firefox/streaming-ad-muter/streaming_ad_muter-1.5.xpi"
+        },
+        {
+          "version": "1.6",
+          "update_link": "https://devopsbytes.com/addons/firefox/streaming-ad-muter/streaming_ad_muter-1.6.xpi"
         }
       ]
     }

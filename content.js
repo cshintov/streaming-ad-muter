@@ -2,60 +2,30 @@
 let countdownTimer = null;
 let countdownInterval = null;
 let adOverlay = null;
-let contentCache = [];
-let currentContentIndex = 0;
-
-// Static content for offline/fallback
-const staticContent = [
-  { type: "💡 Did you know", content: "Honey never spoils. Archaeologists have found edible honey in ancient Egyptian tombs!" },
-  { type: "🧠 Quick Tip", content: "Press Ctrl+Shift+T to reopen the last closed browser tab." },
-  { type: "📚 Fun Fact", content: "Octopuses have three hearts and blue blood!" },
-  { type: "✨ Inspiration", content: "The only impossible journey is the one you never begin. - Tony Robbins" },
-  { type: "🔢 Number Trivia", content: "The number 4 is the only number with the same number of letters as its value." },
-  { type: "🧠 Quick Tip", content: "Double-click a word to select it instantly in most text editors." },
-  { type: "💡 Did you know", content: "A group of flamingos is called a 'flamboyance'!" },
-  { type: "📚 Fun Fact", content: "Bananas are berries, but strawberries aren't!" },
-  { type: "✨ Inspiration", content: "Success is not final, failure is not fatal: it is the courage to continue that counts. - Winston Churchill" },
-  { type: "🧠 Quick Tip", content: "Use Ctrl+L to quickly select the address bar in your browser." }
-];
-
-// Fetch content from APIs
-async function fetchRandomContent() {
-  const contentSources = [
-    {
-      url: 'https://asli-fun-fact-api.herokuapp.com/',
-      type: '📚 Fun Fact',
-      parser: (data) => data.data
-    },
-    {
-      url: 'http://numbersapi.com/random?json',
-      type: '🔢 Number Trivia', 
-      parser: (data) => data.text
-    }
-  ];
-
-  try {
-    const randomSource = contentSources[Math.floor(Math.random() * contentSources.length)];
-    const response = await fetch(randomSource.url);
-    const data = await response.json();
-    return {
-      type: randomSource.type,
-      content: randomSource.parser(data)
-    };
-  } catch (error) {
-    // Fallback to static content if API fails
-    return staticContent[Math.floor(Math.random() * staticContent.length)];
-  }
-}
 
 // Get next content item
 async function getNextContent() {
-  // Mix API content with static content
-  if (Math.random() < 0.9) { // 90% chance for API content
-    return await fetchRandomContent();
-  } else { // 10% chance for static content
-    return staticContent[Math.floor(Math.random() * staticContent.length)];
+  try {
+    const content = await browser.runtime.sendMessage({ action: 'getContent' });
+    if (content) {
+      console.log('[AdMute] Overlay fact served:', content.source || 'unknown', content.type, content.content);
+      return content;
+    }
+  } catch (error) {
+    console.error('[AdMute] Error fetching fact from stored library:', error);
   }
+
+  console.warn('[AdMute] No stored fact available; showing library loading state instead of a static fact');
+  return null;
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // Create and inject countdown timer element
@@ -176,6 +146,9 @@ async function createEducationalOverlay() {
   
   // Get random educational content
   const contentItem = await getNextContent();
+  overlay.dataset.admuteFactSource = contentItem ? contentItem.source || 'unknown' : 'no-stored-fact';
+  overlay.dataset.admuteFactType = contentItem ? contentItem.type || '' : 'Fact library loading';
+  overlay.dataset.admuteFactContent = contentItem ? contentItem.content || '' : '';
   
   const centerContent = document.createElement('div');
   centerContent.style.cssText = `
@@ -187,18 +160,7 @@ async function createEducationalOverlay() {
     pointer-events: none;
   `;
   
-  centerContent.innerHTML = `
-    <div style="
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 16px;
-      padding: 32px;
-      backdrop-filter: blur(8px);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-    ">
-      <div style="font-size: 32px; margin-bottom: 16px;">🔇</div>
-      <div style="font-size: 14px; opacity: 0.7; margin-bottom: 24px;">Ad is playing - Audio muted</div>
-      
+  const factMarkup = contentItem ? `
       <div style="
         background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
         border-radius: 12px;
@@ -211,13 +173,47 @@ async function createEducationalOverlay() {
           font-weight: 600;
           margin-bottom: 12px;
           color: #ffd700;
-        ">${contentItem.type}</div>
+        ">${escapeHtml(contentItem.type)}</div>
         <div style="
           font-size: 16px;
           line-height: 1.5;
           font-weight: 400;
-        ">${contentItem.content}</div>
+        ">${escapeHtml(contentItem.content)}</div>
       </div>
+  ` : `
+      <div style="
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 20px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      ">
+        <div style="
+          font-size: 18px;
+          font-weight: 600;
+          margin-bottom: 12px;
+          color: #ffd700;
+        ">Fact library loading</div>
+        <div style="
+          font-size: 16px;
+          line-height: 1.5;
+          font-weight: 400;
+        ">OpenRouter facts are still being fetched. No static fact fallback is enabled.</div>
+      </div>
+  `;
+
+  centerContent.innerHTML = `
+    <div style="
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 32px;
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    ">
+      <div style="font-size: 32px; margin-bottom: 16px;">🔇</div>
+      <div style="font-size: 14px; opacity: 0.7; margin-bottom: 24px;">Ad is playing - Audio muted</div>
+      ${factMarkup}
       
       <div style="font-size: 12px; opacity: 0.5;">(Click anywhere to dismiss)</div>
     </div>

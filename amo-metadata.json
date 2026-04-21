@@ -1,7 +1,7 @@
 {
   "version": {
     "release_notes": {
-      "en-US": "Version 1.5 changelog:\n- Revolutionary educational overlay: Learn during ad breaks!\n- Multiple overlay modes: Educational, Simple Veil, or Minimal\n- Live API integration for fresh facts, tips, and inspiration\n- User preferences for personalized experience\n- Content categories: Fun Facts, Quick Tips, Number Trivia, Inspiration\n- 90/10 mix of API/static content for maximum variety"
+      "en-US": "Version 1.6 changelog:\n- OpenRouter fact library now stores successful batches immediately instead of waiting for the full initial fill\n- Added bounded OpenRouter responses, retry handling, and reasoning-disabled requests for more reliable free-router results\n- Removed static/public fact fallbacks so educational overlays only use the local OpenRouter-backed library\n- Added fact-library troubleshooting status in the popup and a local Node harness for provider workflow testing\n- Escaped generated fact text before rendering in the overlay"
     }
   }
 }
