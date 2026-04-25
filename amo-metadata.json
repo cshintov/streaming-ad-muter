@@ -1,7 +1,7 @@
 {
   "version": {
     "release_notes": {
-      "en-US": "Version 1.6 changelog:\n- OpenRouter fact library now stores successful batches immediately instead of waiting for the full initial fill\n- Added bounded OpenRouter responses, retry handling, and reasoning-disabled requests for more reliable free-router results\n- Removed static/public fact fallbacks so educational overlays only use the local OpenRouter-backed library\n- Added fact-library troubleshooting status in the popup and a local Node harness for provider workflow testing\n- Escaped generated fact text before rendering in the overlay"
+      "en-US": "Version 1.7 changelog:\n- Overlay now appears correctly when the video player is in fullscreen mode (re-parented into the fullscreen element)\n- Unified overlay heading to \"Fun Facts\" instead of alternating AI Fact/AI Tip\n- Replaced innerHTML usage in content script and popup with safe DOM construction\n- Skip transient OpenRouter batch failures and only abort after several consecutive failures, with failure counters surfaced in the popup diagnostics"
     }
   }
 }

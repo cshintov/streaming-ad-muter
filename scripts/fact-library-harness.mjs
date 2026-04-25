@@ -193,8 +193,8 @@ function parseOpenRouterFacts(content, { model, batchId, now }) {
     .split('\n')
     .map((line) => line.trim().replace(/^[0-9.-]+\s+/, ''))
     .filter(isLikelyCompleteFact)
-    .map((line, index) => ({
-      type: index % 2 === 0 ? 'AI Fact' : 'AI Tip',
+    .map((line) => ({
+      type: 'Fun Facts',
       content: line,
       source: 'openrouter',
       model,

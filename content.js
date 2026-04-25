@@ -3,6 +3,28 @@ let countdownTimer = null;
 let countdownInterval = null;
 let adOverlay = null;
 
+// Fullscreen-aware parent: when the player goes fullscreen, only descendants
+// of document.fullscreenElement render — so the overlay/timer must live there.
+function getOverlayContainer() {
+  return document.fullscreenElement || document.webkitFullscreenElement || document.body;
+}
+
+function reparentAdmuteElements() {
+  const container = getOverlayContainer();
+  for (const id of ['admute-overlay', 'admute-countdown']) {
+    const el = document.getElementById(id);
+    if (el && el.parentNode !== container) {
+      container.appendChild(el);
+    }
+  }
+}
+
+if (!window.__admuteFullscreenHookInstalled) {
+  window.__admuteFullscreenHookInstalled = true;
+  document.addEventListener('fullscreenchange', reparentAdmuteElements);
+  document.addEventListener('webkitfullscreenchange', reparentAdmuteElements);
+}
+
 // Get next content item
 async function getNextContent() {
   try {
@@ -19,13 +41,16 @@ async function getNextContent() {
   return null;
 }
 
-function escapeHtml(value) {
-  return String(value || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+function el(tag, opts = {}, ...children) {
+  const node = document.createElement(tag);
+  if (opts.style) node.style.cssText = opts.style;
+  if (opts.id) node.id = opts.id;
+  if (opts.text != null) node.textContent = String(opts.text);
+  for (const child of children) {
+    if (child == null) continue;
+    node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+  }
+  return node;
 }
 
 // Create and inject countdown timer element
@@ -57,12 +82,10 @@ function createCountdownTimer() {
     transition: opacity 0.3s ease;
   `;
   
-  timer.innerHTML = `
-    <span style="color: #ff6b6b;">🔇</span>
-    <span id="admute-time">00:00</span>
-  `;
+  timer.appendChild(el('span', { style: 'color: #ff6b6b;', text: '🔇' }));
+  timer.appendChild(el('span', { id: 'admute-time', text: '00:00' }));
   
-  document.body.appendChild(timer);
+  getOverlayContainer().appendChild(timer);
   return timer;
 }
 
@@ -104,12 +127,10 @@ function createSimpleOverlay() {
     pointer-events: none;
   `;
   
-  centerContent.innerHTML = `
-    <div style="font-size: 48px; margin-bottom: 16px;">🔇</div>
-    <div style="font-size: 24px; font-weight: 600;">Ad is playing...</div>
-    <div style="font-size: 16px; margin-top: 8px; opacity: 0.8;">Audio muted</div>
-    <div style="font-size: 14px; margin-top: 12px; opacity: 0.6;">(Click to dismiss)</div>
-  `;
+  centerContent.appendChild(el('div', { style: 'font-size: 48px; margin-bottom: 16px;', text: '🔇' }));
+  centerContent.appendChild(el('div', { style: 'font-size: 24px; font-weight: 600;', text: 'Ad is playing...' }));
+  centerContent.appendChild(el('div', { style: 'font-size: 16px; margin-top: 8px; opacity: 0.8;', text: 'Audio muted' }));
+  centerContent.appendChild(el('div', { style: 'font-size: 14px; margin-top: 12px; opacity: 0.6;', text: '(Click to dismiss)' }));
   
   overlay.appendChild(centerContent);
   
@@ -120,7 +141,7 @@ function createSimpleOverlay() {
     hideOverlay();
   });
   
-  document.body.appendChild(overlay);
+  getOverlayContainer().appendChild(overlay);
   return overlay;
 }
 
@@ -160,64 +181,43 @@ async function createEducationalOverlay() {
     pointer-events: none;
   `;
   
-  const factMarkup = contentItem ? `
-      <div style="
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
-        border-radius: 12px;
-        padding: 24px;
-        margin-bottom: 20px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-      ">
-        <div style="
-          font-size: 18px;
-          font-weight: 600;
-          margin-bottom: 12px;
-          color: #ffd700;
-        ">${escapeHtml(contentItem.type)}</div>
-        <div style="
-          font-size: 16px;
-          line-height: 1.5;
-          font-weight: 400;
-        ">${escapeHtml(contentItem.content)}</div>
-      </div>
-  ` : `
-      <div style="
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
-        border-radius: 12px;
-        padding: 24px;
-        margin-bottom: 20px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-      ">
-        <div style="
-          font-size: 18px;
-          font-weight: 600;
-          margin-bottom: 12px;
-          color: #ffd700;
-        ">Fact library loading</div>
-        <div style="
-          font-size: 16px;
-          line-height: 1.5;
-          font-weight: 400;
-        ">OpenRouter facts are still being fetched. No static fact fallback is enabled.</div>
-      </div>
+  const factCardStyle = `
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
   `;
+  const factTitleStyle = 'font-size: 18px; font-weight: 600; margin-bottom: 12px; color: #ffd700;';
+  const factBodyStyle = 'font-size: 16px; line-height: 1.5; font-weight: 400;';
 
-  centerContent.innerHTML = `
-    <div style="
+  const factCard = el('div', { style: factCardStyle },
+    el('div', {
+      style: factTitleStyle,
+      text: contentItem ? contentItem.type : 'Fact library loading'
+    }),
+    el('div', {
+      style: factBodyStyle,
+      text: contentItem ? contentItem.content : 'OpenRouter facts are still being fetched. No static fact fallback is enabled.'
+    })
+  );
+
+  const card = el('div', {
+    style: `
       background: rgba(255, 255, 255, 0.1);
       border-radius: 16px;
       padding: 32px;
       backdrop-filter: blur(8px);
       border: 1px solid rgba(255, 255, 255, 0.2);
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-    ">
-      <div style="font-size: 32px; margin-bottom: 16px;">🔇</div>
-      <div style="font-size: 14px; opacity: 0.7; margin-bottom: 24px;">Ad is playing - Audio muted</div>
-      ${factMarkup}
-      
-      <div style="font-size: 12px; opacity: 0.5;">(Click anywhere to dismiss)</div>
-    </div>
-  `;
+    `
+  },
+    el('div', { style: 'font-size: 32px; margin-bottom: 16px;', text: '🔇' }),
+    el('div', { style: 'font-size: 14px; opacity: 0.7; margin-bottom: 24px;', text: 'Ad is playing - Audio muted' }),
+    factCard,
+    el('div', { style: 'font-size: 12px; opacity: 0.5;', text: '(Click anywhere to dismiss)' })
+  );
+  centerContent.appendChild(card);
   
   overlay.appendChild(centerContent);
   
@@ -228,7 +228,7 @@ async function createEducationalOverlay() {
     hideOverlay();
   });
   
-  document.body.appendChild(overlay);
+  getOverlayContainer().appendChild(overlay);
   return overlay;
 }
 
