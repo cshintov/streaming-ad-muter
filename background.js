@@ -2,7 +2,13 @@
 let adStates = {};
 let originalVolumes = {};
 let adTimeouts = {};
+let settleTimeouts = {};
 let debugEnabled = false;
+
+// After a duration timer fires, wait this long before actually unmuting. If a
+// new ad arrives in the gap, the settle is cancelled, so back-to-back ads
+// produce no audible blip. Only adds latency at a true game resume.
+const UNMUTE_SETTLE_MS = 2000;
 
 // Always log that the extension is starting
 console.log('[AdMute] Background script loaded at', new Date().toISOString());
@@ -62,18 +68,40 @@ const SONYLIV_PATTERNS = {
   CONTENT_RESUME: "drm.sonyliv.com"
 };
 
+function cancelDeferredUnmute(tabId, reason) {
+  if (settleTimeouts[tabId]) {
+    console.log(`[AdMute] ✋ Cancelled pending settle unmute on tab ${tabId} (${reason})`);
+    clearTimeout(settleTimeouts[tabId]);
+    delete settleTimeouts[tabId];
+  }
+}
+
+function scheduleDeferredUnmute(tabId, reason) {
+  cancelDeferredUnmute(tabId, 'replaced by new settle');
+  console.log(`[AdMute] 🕒 Scheduling unmute in ${UNMUTE_SETTLE_MS}ms (${reason})`);
+  settleTimeouts[tabId] = setTimeout(async () => {
+    delete settleTimeouts[tabId];
+    console.log(`[AdMute] 🔊 Settle elapsed, unmuting tab ${tabId} (${reason})`);
+    await handleTabMuting(tabId, false);
+  }, UNMUTE_SETTLE_MS);
+}
+
 // Helper functions
 async function handleTabMuting(tabId, shouldMute, isCricketAd = false) {
   try {
     if (debugEnabled) console.log(`[Debug] Handling tab muting:`, { tabId, shouldMute, isCricketAd });
     const tab = await browser.tabs.get(tabId);
     if (debugEnabled) console.log(`[Debug] Current tab state:`, { muted: tab.mutedInfo.muted });
-    
-    if (shouldMute && !tab.mutedInfo.muted) {
-      if (debugEnabled) console.log(`[Debug] Muting tab ${tabId}`);
-      originalVolumes[tabId] = tab.mutedInfo.muted;
-      await browser.tabs.update(tabId, { muted: true });
-    } else if (!shouldMute) {  
+
+    if (shouldMute) {
+      // New ad arrived — abort any pending settle so back-to-back ads stay muted
+      cancelDeferredUnmute(tabId, 'new mute requested');
+      if (!tab.mutedInfo.muted) {
+        if (debugEnabled) console.log(`[Debug] Muting tab ${tabId}`);
+        originalVolumes[tabId] = tab.mutedInfo.muted;
+        await browser.tabs.update(tabId, { muted: true });
+      }
+    } else {
       if (debugEnabled) console.log(`[Debug] Unmuting tab ${tabId}`);
       await browser.tabs.update(tabId, { muted: false });
       delete originalVolumes[tabId];
@@ -81,6 +109,7 @@ async function handleTabMuting(tabId, shouldMute, isCricketAd = false) {
         clearTimeout(adTimeouts[tabId]);
         delete adTimeouts[tabId];
       }
+      cancelDeferredUnmute(tabId, 'direct unmute');
       // Stop countdown timer when manually unmuting
       browser.tabs.sendMessage(tabId, { action: 'stopCountdown' }).catch(() => {});
     }
@@ -126,6 +155,10 @@ browser.tabs.onRemoved.addListener((tabId) => {
     clearTimeout(adTimeouts[tabId]);
     delete adTimeouts[tabId];
   }
+  if (settleTimeouts[tabId]) {
+    clearTimeout(settleTimeouts[tabId]);
+    delete settleTimeouts[tabId];
+  }
   delete originalVolumes[tabId];
   delete adStates[tabId];
 });
@@ -135,6 +168,10 @@ browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (adTimeouts[tabId]) {
       clearTimeout(adTimeouts[tabId]);
       delete adTimeouts[tabId];
+    }
+    if (settleTimeouts[tabId]) {
+      clearTimeout(settleTimeouts[tabId]);
+      delete settleTimeouts[tabId];
     }
     if (originalVolumes[tabId]) {
       handleTabMuting(tabId, false);
@@ -258,12 +295,11 @@ function handleHotstarRequest(url, tabId, handleTabMuting) {
       }
       console.log('[AdMute] ⏰ Setting timer for', adDuration + 's', 'on tab', tabId);
       adTimeouts[tabId] = setTimeout(async () => {
-        console.log('[AdMute] ⏰ Timer expired! Unmuting after', adDuration + 's');
-        logHotstarEvent(tabId, '🔊 Unmuting - Cricket Ad Duration Complete', { adDuration });
-        await handleTabMuting(tabId, false);
-        // Stop countdown timer
-        browser.tabs.sendMessage(tabId, { action: 'stopCountdown' }).catch(() => {});
+        console.log('[AdMute] ⏰ Timer expired after', adDuration + 's, scheduling settle');
+        logHotstarEvent(tabId, '🕒 Settle scheduled - Cricket Ad Duration Complete', { adDuration });
         delete adTimeouts[tabId];
+        browser.tabs.sendMessage(tabId, { action: 'stopCountdown' }).catch(() => {});
+        scheduleDeferredUnmute(tabId, `cricket ad ${adDuration}s expired`);
       }, adDuration * 1000);
       
       // Start countdown timer
@@ -284,12 +320,11 @@ function handleHotstarRequest(url, tabId, handleTabMuting) {
       }
       console.log('[AdMute] ⏰ Setting DEFAULT timer for 30s on tab', tabId);
       adTimeouts[tabId] = setTimeout(async () => {
-        console.log('[AdMute] ⏰ DEFAULT Timer expired! Unmuting after 30s');
-        logHotstarEvent(tabId, '🔊 Unmuting - Cricket Ad Complete (default)', { adDuration: 30 });
-        await handleTabMuting(tabId, false);
-        // Stop countdown timer
-        browser.tabs.sendMessage(tabId, { action: 'stopCountdown' }).catch(() => {});
+        console.log('[AdMute] ⏰ DEFAULT Timer expired after 30s, scheduling settle');
+        logHotstarEvent(tabId, '🕒 Settle scheduled - Cricket Ad Complete (default)', { adDuration: 30 });
         delete adTimeouts[tabId];
+        browser.tabs.sendMessage(tabId, { action: 'stopCountdown' }).catch(() => {});
+        scheduleDeferredUnmute(tabId, 'cricket ad default 30s expired');
       }, 30000);
       
       // Start countdown timer for default duration
@@ -320,11 +355,10 @@ function handleHotstarRequest(url, tabId, handleTabMuting) {
         clearTimeout(adTimeouts[tabId]);
       }
       adTimeouts[tabId] = setTimeout(async () => {
-        logHotstarEvent(tabId, '🔊 Unmuting - Ad Duration Complete', { breakInfo });
-        await handleTabMuting(tabId, false);
-        // Stop countdown timer
-        browser.tabs.sendMessage(tabId, { action: 'stopCountdown' }).catch(() => {});
+        logHotstarEvent(tabId, '🕒 Settle scheduled - Ad Duration Complete', { breakInfo });
         delete adTimeouts[tabId];
+        browser.tabs.sendMessage(tabId, { action: 'stopCountdown' }).catch(() => {});
+        scheduleDeferredUnmute(tabId, `ad ${breakInfo.adDuration}s expired`);
       }, breakInfo.adDuration * 1000);
       
       // Start countdown timer
@@ -337,10 +371,10 @@ function handleHotstarRequest(url, tabId, handleTabMuting) {
 
   // Check for ad completion when no duration was provided
   if (url.includes(HOTSTAR_PATTERNS.AD_COMPLETE)) {
-    logHotstarEvent(tabId, '🔊 Unmuting - Ad Complete (q100)', { url });
-    // Stop countdown timer
+    logHotstarEvent(tabId, '🕒 Settle scheduled - Ad Complete (q100)', { url });
     browser.tabs.sendMessage(tabId, { action: 'stopCountdown' }).catch(() => {});
-    return handleTabMuting(tabId, false);
+    scheduleDeferredUnmute(tabId, 'q100 ad complete');
+    return;
   }
 }
 

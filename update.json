@@ -25,6 +25,10 @@
         {
           "version": "1.7",
           "update_link": "https://devopsbytes.com/addons/firefox/streaming-ad-muter/streaming_ad_muter-1.7.xpi"
+        },
+        {
+          "version": "1.8",
+          "update_link": "https://devopsbytes.com/addons/firefox/streaming-ad-muter/streaming_ad_muter-1.8.xpi"
         }
       ]
     }

@@ -1,7 +1,7 @@
 {
   "version": {
     "release_notes": {
-      "en-US": "Version 1.7 changelog:\n- Overlay now appears correctly when the video player is in fullscreen mode (re-parented into the fullscreen element)\n- Unified overlay heading to \"Fun Facts\" instead of alternating AI Fact/AI Tip\n- Replaced innerHTML usage in content script and popup with safe DOM construction\n- Skip transient OpenRouter batch failures and only abort after several consecutive failures, with failure counters surfaced in the popup diagnostics"
+      "en-US": "Version 1.8 changelog:\n- Eliminated the brief audio blip between back-to-back ads: unmute is now deferred by 2 seconds after the duration timer expires, and a new ad arriving in that window cancels the unmute so the tab stays muted seamlessly.\n- True game-resume is unaffected: if Hotstar requests an actual cricket video chunk during the settle window, the tab unmutes immediately."
     }
   }
 }
