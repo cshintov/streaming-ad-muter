@@ -110,8 +110,10 @@ async function handleTabMuting(tabId, shouldMute, isCricketAd = false) {
         delete adTimeouts[tabId];
       }
       cancelDeferredUnmute(tabId, 'direct unmute');
-      // Stop countdown timer when manually unmuting
+      // Settle window over (or bypassed by a confirmed game-resume signal):
+      // tear down both timer and overlay together so visuals match audio.
       browser.tabs.sendMessage(tabId, { action: 'stopCountdown' }).catch(() => {});
+      browser.tabs.sendMessage(tabId, { action: 'hideOverlay' }).catch(() => {});
     }
   } catch (error) {
     console.error('Error handling tab muting:', error);

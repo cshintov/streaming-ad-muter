@@ -234,10 +234,12 @@ async function createEducationalOverlay() {
 
 // Create overlay based on user preference
 async function createAdOverlay() {
-  // Remove existing overlay if any
+  // If an overlay already exists (e.g. back-to-back ad starting inside the
+  // settle window), keep it — recreating causes a visible flicker.
   const existing = document.getElementById('admute-overlay');
   if (existing) {
-    existing.remove();
+    existing.style.opacity = '1';
+    return existing;
   }
 
   // Get user preference
@@ -277,9 +279,8 @@ function hideCountdown() {
     clearInterval(countdownInterval);
     countdownInterval = null;
   }
-  
-  // Also hide overlay when countdown ends
-  hideOverlay();
+  // Overlay lifetime is owned by background.js (settle timer). Do not hide it
+  // here — back-to-back ads need the overlay to stay continuously visible.
 }
 
 async function startCountdown(durationSeconds) {
