@@ -1,3 +1,24 @@
+const MODEL_PRESETS = [
+  'openrouter/free',
+  'anthropic/claude-haiku-4.5',
+  'openai/gpt-4o-mini',
+  'google/gemini-2.5-flash',
+  'meta-llama/llama-3.3-70b-instruct:free'
+];
+const DEFAULT_CATEGORIES_PRESET = {
+  Science: true,
+  History: true,
+  Geography: true,
+  Space: true,
+  Technology: true,
+  Language: true,
+  Food: true,
+  Sports: true,
+  "Arts & Music": true,
+  "Nature & Animals": true,
+  "Productivity Tips": true
+};
+
 function formatTime(value) {
   if (!value) return 'never';
   return new Date(value).toLocaleString();
@@ -30,6 +51,14 @@ function renderFactStore(snapshot) {
   summary.replaceChildren();
 
   summary.appendChild(labeled('OpenRouter key:', snapshot.hasOpenRouterKey ? 'configured' : 'missing'));
+  if (snapshot.config) {
+    summary.appendChild(labeled('Model:', snapshot.config.model || '?'));
+    const cats = snapshot.config.categories || [];
+    summary.appendChild(labeled('Categories:', cats.length ? `${cats.length} active` : 'none'));
+  }
+  if (typeof snapshot.recentRingSize === 'number') {
+    summary.appendChild(labeled('Recent-served ring:', `${snapshot.recentRingSize} / ${snapshot.recentRingMax || '?'}`));
+  }
   summary.appendChild(labeled('Library:',
     `${library.total || 0} / ${policy.maxStoredFacts || '?'} facts (${library.openrouter || 0} OpenRouter, ${library.legacy || 0} legacy)`));
   summary.appendChild(labeled('Policy:',
@@ -83,6 +112,80 @@ async function refreshFactStorePanel() {
   renderFactStore(snapshot);
 }
 
+async function clearAndRefetch() {
+  await browser.runtime.sendMessage({ action: 'clearCache' });
+  setTimeout(refreshFactStorePanel, 750);
+}
+
+async function initFactGenConfigUI(cfgData) {
+  const select = document.getElementById('factModelSelect');
+  const customInput = document.getElementById('factModelCustom');
+  const extrasInput = document.getElementById('factCategoriesExtras');
+  const grid = document.getElementById('factCategoriesGrid');
+  if (!select || !grid) return;
+
+  // Model: match preset or fall into Custom
+  const storedModel = String(cfgData.factModel || 'openrouter/free').trim() || 'openrouter/free';
+  if (MODEL_PRESETS.includes(storedModel)) {
+    select.value = storedModel;
+    customInput.hidden = true;
+    customInput.value = '';
+  } else {
+    select.value = '__custom__';
+    customInput.hidden = false;
+    customInput.value = storedModel;
+  }
+  select.addEventListener('change', async () => {
+    if (select.value === '__custom__') {
+      customInput.hidden = false;
+      customInput.focus();
+      // Don't save yet — wait for user to type a slug and trigger change on the input
+      return;
+    }
+    customInput.hidden = true;
+    customInput.value = '';
+    await browser.storage.local.set({ factModel: select.value });
+    clearAndRefetch();
+  });
+  customInput.addEventListener('change', async () => {
+    const slug = customInput.value.trim();
+    if (!slug) return;
+    await browser.storage.local.set({ factModel: slug });
+    clearAndRefetch();
+  });
+
+  // Categories grid
+  const storedPreset = cfgData.factCategoriesPreset || DEFAULT_CATEGORIES_PRESET;
+  grid.replaceChildren();
+  Object.keys(DEFAULT_CATEGORIES_PRESET).forEach((name) => {
+    const id = 'cat_' + name.replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+    const checked = storedPreset[name] !== false; // default true
+    const cb = el('input', {});
+    cb.type = 'checkbox';
+    cb.id = id;
+    cb.checked = checked;
+    cb.style.cssText = 'margin-right: 6px;';
+    cb.addEventListener('change', async () => {
+      const current = (await browser.storage.local.get(['factCategoriesPreset'])).factCategoriesPreset || { ...DEFAULT_CATEGORIES_PRESET };
+      current[name] = cb.checked;
+      await browser.storage.local.set({ factCategoriesPreset: current });
+      clearAndRefetch();
+    });
+    const label = el('label', { style: 'display: flex; align-items: center; cursor: pointer;' });
+    label.htmlFor = id;
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(name));
+    grid.appendChild(label);
+  });
+
+  // Extras
+  extrasInput.value = String(cfgData.factCategoriesExtras || '');
+  extrasInput.addEventListener('change', async () => {
+    await browser.storage.local.set({ factCategoriesExtras: extrasInput.value });
+    clearAndRefetch();
+  });
+}
+
 // Popup script to show current status
 document.addEventListener('DOMContentLoaded', async () => {
   try {
@@ -115,6 +218,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Load OpenRouter key
     const openRouterInput = document.getElementById('openRouterKey');
     if (openRouterInput) openRouterInput.value = result.openRouterKey || '';
+
+    // Load fact-gen config (model + categories + extras)
+    const cfgData = await browser.storage.local.get([
+      'factModel', 'factCategoriesPreset', 'factCategoriesExtras'
+    ]);
+    await initFactGenConfigUI(cfgData);
 
     // Handle OpenRouter key changes
     if (openRouterInput) {

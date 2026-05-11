@@ -69,6 +69,31 @@
     </p>
   </div>
 
+  <div class="fact-config-section" style="margin: 16px 0; padding: 12px; border: 1px solid #0ea5e9; border-radius: 4px; background: rgba(14, 165, 233, 0.05);">
+    <h4 style="margin: 0 0 8px 0; color: #0369a1;">Fact Generation</h4>
+
+    <label style="display: block; font-size: 12px; color: #555; margin: 8px 0 4px;">Model</label>
+    <select id="factModelSelect" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; box-sizing: border-box;">
+      <option value="openrouter/free">Free (auto-router) — default</option>
+      <option value="anthropic/claude-haiku-4.5">Claude Haiku 4.5 (paid)</option>
+      <option value="openai/gpt-4o-mini">GPT-4o-mini (paid)</option>
+      <option value="google/gemini-2.5-flash">Gemini 2.5 Flash (paid)</option>
+      <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 70B (free)</option>
+      <option value="__custom__">Custom…</option>
+    </select>
+    <input id="factModelCustom" type="text" placeholder="openrouter/model-slug" hidden
+      style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; margin-top: 6px; box-sizing: border-box;">
+
+    <label style="display: block; font-size: 12px; color: #555; margin: 12px 0 4px;">Categories</label>
+    <div id="factCategoriesGrid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; font-size: 12px;"></div>
+
+    <label style="display: block; font-size: 12px; color: #555; margin: 12px 0 4px;">Also include (comma-separated)</label>
+    <input id="factCategoriesExtras" type="text" placeholder="blockchain, F1, jazz"
+      style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; box-sizing: border-box;">
+
+    <p style="font-size: 11px; color: #666; margin: 8px 0 0 0;">Changes clear the fact library and refetch under the new config.</p>
+  </div>
+
   <div class="fact-store-section" style="margin: 16px 0; padding: 12px; border: 1px solid #8b5cf6; border-radius: 4px; background: rgba(139, 92, 246, 0.06);">
     <h4 style="margin: 0 0 8px 0; color: #6d28d9;">Fact Library</h4>
     <div id="factStoreSummary" style="font-size: 12px; color: #333; line-height: 1.4;">

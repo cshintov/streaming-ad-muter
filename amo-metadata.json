@@ -1,7 +1,7 @@
 {
   "version": {
     "release_notes": {
-      "en-US": "Version 1.8 changelog:\n- Eliminated the brief audio blip between back-to-back ads: unmute is now deferred by 2 seconds after the duration timer expires, and a new ad arriving in that window cancels the unmute so the tab stays muted seamlessly.\n- True game-resume is unaffected: if Hotstar requests an actual cricket video chunk during the settle window, the tab unmutes immediately."
+      "en-US": "Version 1.9 changelog:\n- New: pick the OpenRouter model used for facts. Curated dropdown (free auto-router, Claude Haiku, GPT-4o-mini, Gemini Flash, Llama 3.3 70B free) plus a Custom slug option for power users. Lets you avoid hallucination-prone free models.\n- New: configure fact categories. 11 preset checkboxes (Science, History, Space, Tech, Language, Food, Sports, Arts, Nature, Productivity, Geography) plus a free-text 'Also include' field for niche topics.\n- New: anti-repetition ring. Recently-served facts are remembered (up to 200) so the same fact doesn't recur until the library has cycled."
     }
   }
 }

@@ -442,15 +442,33 @@ const OPENROUTER_BATCH_MAX_ATTEMPTS = 3;
 const OPENROUTER_FILL_MAX_CONSECUTIVE_FAILURES = 6;
 const FACT_MIN_LENGTH = 15;
 const FACT_MAX_LENGTH = 220;
+const MAX_RECENT_SERVED = 200;
+const MAX_PICK_ATTEMPTS = 10;
+const DEFAULT_CATEGORIES_PRESET = {
+  Science: true,
+  History: true,
+  Geography: true,
+  Space: true,
+  Technology: true,
+  Language: true,
+  Food: true,
+  Sports: true,
+  "Arts & Music": true,
+  "Nature & Animals": true,
+  "Productivity Tips": true
+};
 let isFetching = false;
 
 function getOpenRouterMaxTokens(count) {
   return Math.min(1200, Math.max(120, count * OPENROUTER_MAX_TOKENS_PER_FACT));
 }
 
-function buildOpenRouterFactRequest(count, batchId) {
+function buildOpenRouterFactRequest({ count, batchId, model, categories }) {
+  const catText = categories && categories.length
+    ? `Prefer obscure ${categories.join(', ')} facts.`
+    : `Prefer any obscure fun facts.`;
   return {
-    model: OPENROUTER_MODEL,
+    model: model || OPENROUTER_MODEL,
     max_tokens: getOpenRouterMaxTokens(count),
     temperature: 0.8,
     presence_penalty: 0.6,
@@ -466,10 +484,20 @@ Format: Return ONLY the facts, one per line, no numbers.`
       },
       {
         role: "user",
-        content: `Give me a fresh batch of facts and tips. Batch nonce: ${batchId}. Prefer obscure science, history, language, craft, food, design, and productivity facts.`
+        content: `Give me a fresh batch of facts and tips. Batch nonce: ${batchId}. ${catText}`
       }
     ]
   };
+}
+
+function resolveFactGenConfig(data) {
+  const rawModel = String(data.factModel || '').trim();
+  const model = rawModel || OPENROUTER_MODEL;
+  const preset = data.factCategoriesPreset || DEFAULT_CATEGORIES_PRESET;
+  const enabled = Object.keys(preset).filter(k => preset[k]);
+  const extras = String(data.factCategoriesExtras || '')
+    .split(',').map(s => s.trim()).filter(Boolean);
+  return { model, categories: [...enabled, ...extras] };
 }
 
 function getFactPreview(item) {
@@ -548,7 +576,7 @@ function getOpenRouterChoiceContent(result) {
   return content;
 }
 
-function parseOpenRouterFacts(content, batchId, now) {
+function parseOpenRouterFacts(content, batchId, now, model) {
   return content.trim().split('\n')
     .map(line => line.trim().replace(/^[0-9.-]+\s+/, ''))
     .filter(isLikelyCompleteFact)
@@ -556,7 +584,7 @@ function parseOpenRouterFacts(content, batchId, now) {
       type: "Fun Facts",
       content: content,
       source: 'openrouter',
-      model: OPENROUTER_MODEL,
+      model: model || OPENROUTER_MODEL,
       batchId,
       added: now
     }));
@@ -616,13 +644,26 @@ async function getFactDebugSnapshot() {
     'lastRotationDate',
     'openRouterKey',
     'factDebug',
-    'lastServedFact'
+    'lastServedFact',
+    'factModel',
+    'factCategoriesPreset',
+    'factCategoriesExtras',
+    'recentlyServedFactHashes'
   ]);
+
+  const { model, categories } = resolveFactGenConfig(data);
 
   return {
     hasOpenRouterKey: Boolean(data.openRouterKey),
     lastRotationDate: data.lastRotationDate || 0,
     isFetching,
+    config: {
+      model,
+      categories,
+      extras: String(data.factCategoriesExtras || '')
+    },
+    recentRingSize: (data.recentlyServedFactHashes || []).length,
+    recentRingMax: MAX_RECENT_SERVED,
     policy: {
       initialTarget: INITIAL_LIBRARY_TARGET,
       dailyTarget: DAILY_ENRICHMENT_TARGET,
@@ -638,14 +679,14 @@ async function getFactDebugSnapshot() {
 }
 
 // Library Management
-async function fetchOpenRouterFactBatch(openRouterKey, count, batchId, now) {
+async function fetchOpenRouterFactBatch(openRouterKey, count, batchId, now, model, categories) {
   const startedAt = Date.now();
-  if (debugEnabled) console.log(`[AdMute Facts] OpenRouter batch request started: ${count} facts (${batchId})`);
+  if (debugEnabled) console.log(`[AdMute Facts] OpenRouter batch request started: ${count} facts (${batchId}), model=${model}`);
 
   let lastError = null;
   for (let attempt = 1; attempt <= OPENROUTER_BATCH_MAX_ATTEMPTS; attempt++) {
     try {
-      const items = await fetchOpenRouterFactBatchOnce(openRouterKey, count, batchId, now);
+      const items = await fetchOpenRouterFactBatchOnce(openRouterKey, count, batchId, now, model, categories);
       if (debugEnabled) console.log(`[AdMute Facts] OpenRouter batch completed: requested ${count}, parsed ${items.length}, attempt ${attempt}, ${Date.now() - startedAt}ms`);
       return items;
     } catch (error) {
@@ -657,7 +698,7 @@ async function fetchOpenRouterFactBatch(openRouterKey, count, batchId, now) {
   throw lastError || new Error('OpenRouter batch failed without an error');
 }
 
-async function fetchOpenRouterFactBatchOnce(openRouterKey, count, batchId, now) {
+async function fetchOpenRouterFactBatchOnce(openRouterKey, count, batchId, now, model, categories) {
   const controller = new AbortController();
   let timeoutId = null;
   let response;
@@ -672,7 +713,7 @@ async function fetchOpenRouterFactBatchOnce(openRouterKey, count, batchId, now) 
         "X-Title": "AdMute Extension",
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(buildOpenRouterFactRequest(count, batchId))
+      body: JSON.stringify(buildOpenRouterFactRequest({ count, batchId, model, categories }))
     });
 
     const timeoutPromise = new Promise((_, reject) => {
@@ -699,10 +740,10 @@ async function fetchOpenRouterFactBatchOnce(openRouterKey, count, batchId, now) 
 
   const result = await response.json();
   const content = getOpenRouterChoiceContent(result);
-  const items = parseOpenRouterFacts(content, batchId, now);
+  const items = parseOpenRouterFacts(content, batchId, now, result.model || model);
 
   if (items.length === 0) {
-    throw new Error(`OpenRouter returned content but no usable facts (finish_reason: ${result.choices[0].finish_reason || 'unknown'}, model: ${result.model || OPENROUTER_MODEL})`);
+    throw new Error(`OpenRouter returned content but no usable facts (finish_reason: ${result.choices[0].finish_reason || 'unknown'}, model: ${result.model || model || OPENROUTER_MODEL})`);
   }
 
   return items;
@@ -730,7 +771,11 @@ async function manageFactLibrary(force = false) {
     return getFactDebugSnapshot();
   }
   
-  const data = await browser.storage.local.get(['storedFacts', 'lastRotationDate', 'openRouterKey']);
+  const data = await browser.storage.local.get([
+    'storedFacts', 'lastRotationDate', 'openRouterKey',
+    'factModel', 'factCategoriesPreset', 'factCategoriesExtras'
+  ]);
+  const { model: factModel, categories: factCategories } = resolveFactGenConfig(data);
   if (!data.openRouterKey) {
     if (debugEnabled) console.log('[AdMute Facts] Skipping fact refresh: OpenRouter key is missing');
     await setFactDebugState({
@@ -788,7 +833,7 @@ async function manageFactLibrary(force = false) {
         lastFetchStatus: 'running',
         lastFetchError: null,
         lastFetchReason: fetchReason,
-        lastFetchModel: OPENROUTER_MODEL,
+        lastFetchModel: factModel,
         lastFetchTarget: targetNewFacts,
         lastFetchLibrarySize: storedFacts.length,
         lastFetchFailedBatches: 0,
@@ -815,7 +860,7 @@ async function manageFactLibrary(force = false) {
           lastFetchConsecutiveFailures: consecutiveBatchFailures
         });
         try {
-          const batchItems = await fetchOpenRouterFactBatch(data.openRouterKey, requestedCount, batchId, now);
+          const batchItems = await fetchOpenRouterFactBatch(data.openRouterKey, requestedCount, batchId, now, factModel, factCategories);
           const { kept, duplicates } = filterNewFactsForLibrary(updatedLibrary, batchItems);
           const accepted = kept.slice(0, remaining);
           const overflow = kept.length - accepted.length;
@@ -921,33 +966,56 @@ async function manageFactLibrary(force = false) {
 
 // Fetch educational content
 async function getEducationalContent() {
-  const data = await browser.storage.local.get(['storedFacts']);
+  const data = await browser.storage.local.get(['storedFacts', 'recentlyServedFactHashes']);
   const library = data.storedFacts || [];
+  const recentList = data.recentlyServedFactHashes || [];
+  const recent = new Set(recentList);
 
-  // If we have a library, pick a random one
+  // If we have a library, pick a non-recent random one (ring-based anti-repetition)
   if (library.length > 0) {
-    const randomIndex = Math.floor(Math.random() * library.length);
-    const item = {
-      ...library[randomIndex],
-      source: inferFactSource(library[randomIndex])
-    };
-    
+    let pickedIndex = -1;
+    let picked = null;
+    for (let i = 0; i < MAX_PICK_ATTEMPTS; i++) {
+      const idx = Math.floor(Math.random() * library.length);
+      const candidate = library[idx];
+      const hash = normalizeFactContent(candidate.content);
+      if (!recent.has(hash)) { picked = candidate; pickedIndex = idx; break; }
+    }
+    let fellBackToRepeat = false;
+    if (!picked) {
+      // Ring saturated relative to library — accept a repeat
+      pickedIndex = Math.floor(Math.random() * library.length);
+      picked = library[pickedIndex];
+      fellBackToRepeat = true;
+    }
+    const item = { ...picked, source: inferFactSource(picked) };
+
+    // Append to ring, trim oldest. Dedup first so re-served fact moves to tail.
+    const hash = normalizeFactContent(picked.content);
+    const updatedRecent = recentList.filter(h => h !== hash);
+    updatedRecent.push(hash);
+    while (updatedRecent.length > MAX_RECENT_SERVED) updatedRecent.shift();
+
     // Trigger a quiet check/refill in the background
     manageFactLibrary();
-    
+
     if (debugEnabled) console.log('[AdMute Facts] Serving from stored library:', {
       poolSize: library.length,
-      randomIndex,
+      pickedIndex,
+      ringSize: updatedRecent.length,
+      fellBackToRepeat,
       source: item.source,
       type: item.type,
       preview: item.content
     });
     await browser.storage.local.set({
+      recentlyServedFactHashes: updatedRecent,
       lastServedFact: {
         ...getFactPreview(item),
         servedAt: Date.now(),
-        libraryIndex: randomIndex,
-        librarySize: library.length
+        libraryIndex: pickedIndex,
+        librarySize: library.length,
+        wasRepeat: fellBackToRepeat
       }
     });
     return item;
@@ -986,7 +1054,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
   } else if (message.action === 'refreshFactLibrary') {
     return manageFactLibrary(true);
   } else if (message.action === 'clearCache') {
-    browser.storage.local.set({ storedFacts: [], lastRotationDate: 0, lastServedFact: null }).then(() => {
+    browser.storage.local.set({ storedFacts: [], lastRotationDate: 0, lastServedFact: null, recentlyServedFactHashes: [] }).then(() => {
       setFactDebugState({
         lastClearAt: Date.now(),
         lastFetchStatus: 'cleared'
