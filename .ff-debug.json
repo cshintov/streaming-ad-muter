@@ -1,0 +1,13 @@
+{
+  "addon_id": "streaming-ad-muter@devopsbytes.com",
+  "addon_dir": ".",
+  "log_grep": "AdMute|Hotstar|SonyLIV",
+  "secrets": [
+    {
+      "name": "openrouter-key",
+      "input_id": "openRouterKey",
+      "popup": "popup.html",
+      "value_env": "OPENROUTER_API_KEY"
+    }
+  ]
+}
