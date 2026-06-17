@@ -322,6 +322,63 @@ browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
   }
 });
 
+// Zee5 ad detection (DOM-based, playback-aligned) ----------------------------
+// Zee5 live sport uses Google DAI server-side ad insertion: ads play through the
+// SAME <video> element as the match and everything is prefetched, so network
+// requests are fetch-aligned, not playback-aligned. The reliable signal is the
+// player's own ad UI: #zee-ad-container is display:none during content and flips
+// visible (rect > 0) for the whole ad pod, carrying "Advertisement: M:SS".
+// See context/investigations/zee5/FINDINGS.md.
+function initZee5AdWatcher() {
+  if (!location.hostname.includes('zee5.com')) return;
+  if (window.__admuteZee5WatcherInstalled) return;
+  window.__admuteZee5WatcherInstalled = true;
+
+  let adActive = false;
+
+  function isAdVisible() {
+    const c = document.getElementById('zee-ad-container');
+    if (!c) return false;
+    const r = c.getBoundingClientRect();
+    // Collapsed to 0×0 during content (display:none); large rect during an ad.
+    return r.height > 1 && r.width > 1;
+  }
+
+  function parseAdSeconds() {
+    const cd = document.getElementById('zee-countdown-div')
+            || document.getElementById('zee-ad-container');
+    const m = /(\d+):(\d{2})/.exec(cd && cd.textContent || '');
+    return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : null;
+  }
+
+  function check() {
+    const visible = isAdVisible();
+    if (visible && !adActive) {
+      adActive = true;
+      const duration = parseAdSeconds();
+      console.log('[Zee5] 🔴 Ad UI visible — requesting mute', { duration });
+      browser.runtime.sendMessage({ action: 'zee5AdStart', duration }).catch(() => {});
+    } else if (!visible && adActive) {
+      adActive = false;
+      console.log('[Zee5] 🟢 Ad UI hidden — requesting unmute');
+      browser.runtime.sendMessage({ action: 'zee5AdEnd' }).catch(() => {});
+    }
+  }
+
+  // MutationObserver catches the display flip immediately; the 1s poll is a
+  // safety net (some style changes land on ancestors we may not be observing).
+  const observer = new MutationObserver(check);
+  observer.observe(document.documentElement, {
+    subtree: true, childList: true, attributes: true,
+    attributeFilter: ['style', 'class']
+  });
+  setInterval(check, 1000);
+  check();
+  // Stitched no-overlay ads have no DOM ad UI; those are caught by background.js
+  // via the Google DAI ad-pod network signal (dai.google.com/linear/pods/).
+}
+initZee5AdWatcher();
+
 // Clean up on page unload
 window.addEventListener('beforeunload', () => {
   hideCountdown();

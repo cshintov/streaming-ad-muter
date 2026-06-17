@@ -1,10 +1,11 @@
 {
   "addon_id": "streaming-ad-muter@devopsbytes.com",
   "addon_dir": ".",
-  "log_grep": "AdMute|Hotstar|SonyLIV",
+  "log_grep": "AdMute|Hotstar|SonyLIV|Zee5",
   "test_urls": [
     "https://www.hotstar.com/in/home",
-    "https://www.sonyliv.com"
+    "https://www.sonyliv.com",
+    "https://www.zee5.com"
   ],
   "secrets": [
     {

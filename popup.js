@@ -192,16 +192,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     const tabs = await browser.tabs.query({ active: true, currentWindow: true });
     const currentTab = tabs[0];
     
-    if (currentTab.url.includes('hotstar.com')) {
-      document.querySelector('.status p').textContent = 
-        currentTab.mutedInfo.muted ? 
-        'Ad detected - Tab is currently muted' : 
+    const SUPPORTED_SITES = /(^|\.)(hotstar|sonyliv|zee5)\.com$/;
+    let currentHost = '';
+    try { currentHost = new URL(currentTab.url).hostname; } catch (e) { /* about:, etc. */ }
+
+    if (SUPPORTED_SITES.test(currentHost)) {
+      document.querySelector('.status p').textContent =
+        currentTab.mutedInfo.muted ?
+        'Ad detected - Tab is currently muted' :
         'Monitoring for ads - Tab is not muted';
     } else {
       const statusEl = document.querySelector('.status');
       statusEl.replaceChildren(
-        el('h3', { style: 'color: #666;', text: 'Not on Hotstar' }),
-        el('p', { text: 'Extension only works on hotstar.com' })
+        el('h3', { style: 'color: #666;', text: 'Not on a supported site' }),
+        el('p', { text: 'Works on Hotstar, SonyLIV and Zee5' })
       );
     }
 

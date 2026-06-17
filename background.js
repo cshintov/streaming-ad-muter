@@ -124,7 +124,7 @@ async function handleTabMuting(tabId, shouldMute, isCricketAd = false) {
 browser.webRequest.onBeforeRequest.addListener(
   async (details) => {
     if (details.tabId === -1) return;
-    
+
     const url = details.url.toLowerCase();
     const domain = new URL(details.url).hostname;
     
@@ -137,7 +137,18 @@ browser.webRequest.onBeforeRequest.addListener(
     const tabs = await browser.tabs.query({active: true, currentWindow: true});
     const currentTab = tabs.find(tab => tab.id === details.tabId);
     const isSonyLivTab = currentTab && new URL(currentTab.url).hostname.includes('sonyliv.com');
-    
+
+    // Zee5: overlay ads are detected in content.js (zee5AdStart/zee5AdEnd msgs).
+    // Stitched no-overlay ads have no DOM UI, so we also watch the Google DAI
+    // ad-pod media segments here as a network fallback.
+    const isZee5Tab = currentTab && new URL(currentTab.url).hostname.includes('zee5.com');
+    if (isZee5Tab) {
+      if (url.includes(ZEE5_AD_SEGMENT)) {
+        zee5PodSegmentSeen(details.tabId);
+        return;
+      }
+    }
+
     // Handle SonyLIV ad detection for any domain if we're on a SonyLIV tab
     if (isSonyLivTab) {
       return handleSonyLivRequest(url, details.tabId, handleTabMuting);
@@ -161,6 +172,11 @@ browser.tabs.onRemoved.addListener((tabId) => {
     clearTimeout(settleTimeouts[tabId]);
     delete settleTimeouts[tabId];
   }
+  if (zee5State[tabId]) {
+    if (zee5State[tabId].watchdog) clearTimeout(zee5State[tabId].watchdog);
+    if (zee5State[tabId].domMuteTimer) clearTimeout(zee5State[tabId].domMuteTimer);
+    delete zee5State[tabId];
+  }
   delete originalVolumes[tabId];
   delete adStates[tabId];
 });
@@ -174,6 +190,11 @@ browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (settleTimeouts[tabId]) {
       clearTimeout(settleTimeouts[tabId]);
       delete settleTimeouts[tabId];
+    }
+    if (zee5State[tabId]) {
+      if (zee5State[tabId].watchdog) clearTimeout(zee5State[tabId].watchdog);
+      if (zee5State[tabId].domMuteTimer) clearTimeout(zee5State[tabId].domMuteTimer);
+      delete zee5State[tabId];
     }
     if (originalVolumes[tabId]) {
       handleTabMuting(tabId, false);
@@ -414,6 +435,86 @@ function handleSonyLivRequest(url, tabId, handleTabMuting) {
     if (debugEnabled) console.log(`[SonyLIV ${getISTTime()}] 🔴 Ad Start`);
     return handleTabMuting(tabId, true, false);
   }
+}
+
+// Zee5 ad detection (hybrid) --------------------------------------------------
+// Zee5 live sport uses Google DAI (server-side ad insertion). There are two ad
+// presentations and each needs a different signal:
+//   1. Overlay ads — the player shows #zee-ad-container; content.js detects its
+//      visibility and sends zee5AdStart / zee5AdEnd (playback-aligned, accurate).
+//   2. Stitched no-overlay ads — no DOM ad UI at all; the only client-observable
+//      trace is the DAI ad-pod media segments (dai.google.com/linear/pods/) seen
+//      in webRequest. Network requests are prefetched (fetch-aligned), so we mute
+//      on the first pod and unmute via a "pods stopped" watchdog that errs late
+//      (never unmutes mid-ad). Less precise — best effort for this ad type.
+// An ad is considered active while EITHER signal is active; we unmute (with the
+// settle) only once both clear. See context/investigations/zee5/FINDINGS.md.
+const ZEE5_AD_SEGMENT = "dai.google.com/linear/pods/";
+const ZEE5_NET_WATCHDOG_MS = 5000;  // no pod segment for this long → ad likely over
+const ZEE5_OVERLAY_MUTE_DELAY_MS = 3000;  // grace period before muting on overlay-ad detection
+                                          // (avoids cutting audio on transient overlay flicker)
+const zee5State = {};  // tabId -> { dom, net, watchdog }
+
+function logZee5Event(tabId, event, details = {}) {
+  console.log(`[Zee5 ${getISTTime()}] Tab ${tabId}: ${event}`, debugEnabled ? { tabId, event, ...details } : '');
+}
+
+function zee5GetState(tabId) {
+  return zee5State[tabId] || (zee5State[tabId] = { dom: false, net: false, watchdog: null, domMuteTimer: null });
+}
+
+function zee5Mute(tabId, reason) {
+  adStates[tabId] = 'ad';
+  logZee5Event(tabId, '🔴 Ad Start (' + reason + ')');
+  handleTabMuting(tabId, true);
+  browser.tabs.sendMessage(tabId, { action: 'showOverlay' }).catch(() => {});
+}
+
+function zee5MaybeUnmute(tabId, reason) {
+  const s = zee5GetState(tabId);
+  if (s.dom || s.net) return;  // still in an ad by some signal
+  adStates[tabId] = 'content';
+  logZee5Event(tabId, '🟢 Ad End (' + reason + ')');
+  browser.tabs.sendMessage(tabId, { action: 'stopCountdown' }).catch(() => {});
+  scheduleDeferredUnmute(tabId, 'zee5 ' + reason);
+}
+
+// Overlay-ad signal from content.js (#zee-ad-container visibility)
+function handleZee5AdStart(tabId) {
+  if (tabId == null) return;
+  const s = zee5GetState(tabId);
+  s.dom = true;
+  // Mute after a short grace period, not instantly: the overlay can flicker at ad
+  // boundaries, and an immediate cut feels abrupt. Cancelled in handleZee5AdEnd if
+  // the overlay clears first. Skip if already muted or a mute is already pending.
+  if (adStates[tabId] === 'ad' || s.domMuteTimer) return;
+  s.domMuteTimer = setTimeout(() => {
+    s.domMuteTimer = null;
+    if (s.dom && adStates[tabId] !== 'ad') zee5Mute(tabId, 'overlay');
+  }, ZEE5_OVERLAY_MUTE_DELAY_MS);
+}
+
+function handleZee5AdEnd(tabId) {
+  if (tabId == null) return;
+  const s = zee5GetState(tabId);
+  s.dom = false;
+  if (s.domMuteTimer) { clearTimeout(s.domMuteTimer); s.domMuteTimer = null; }  // cancel pending mute
+  zee5MaybeUnmute(tabId, 'overlay hidden');
+}
+
+// Network fallback for stitched ads: a DAI ad-pod segment was requested
+function zee5PodSegmentSeen(tabId) {
+  if (tabId == null) return;
+  const s = zee5GetState(tabId);
+  const wasActive = s.dom || s.net;
+  s.net = true;
+  if (!wasActive) zee5Mute(tabId, 'DAI pod segment');
+  if (s.watchdog) clearTimeout(s.watchdog);
+  s.watchdog = setTimeout(() => {
+    s.watchdog = null;
+    s.net = false;
+    zee5MaybeUnmute(tabId, 'pods stopped');
+  }, ZEE5_NET_WATCHDOG_MS);
 }
 
 // Initialize debug state on startup
@@ -1047,6 +1148,12 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     debugEnabled = message.enabled;
     console.log('[AdMute] Debug logging', debugEnabled ? 'enabled' : 'disabled');
     return false; // Sync response
+  } else if (message.action === 'zee5AdStart') {
+    handleZee5AdStart(sender.tab && sender.tab.id);
+    return false;
+  } else if (message.action === 'zee5AdEnd') {
+    handleZee5AdEnd(sender.tab && sender.tab.id);
+    return false;
   } else if (message.action === 'getContent') {
     return getEducationalContent(); // Return promise for async response
   } else if (message.action === 'getFactDebug') {
