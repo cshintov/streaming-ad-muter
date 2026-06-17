@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+"""
+admute-detector — native-messaging host for the Streaming Ad Muter addon.
+
+Replaces the Marionette prototype (admon.py). Captures system audio via the
+`tapmon` Core Audio binary, runs a crowd-bed state machine, and tells the addon
+when an ad starts/ends. Works with STOCK Firefox — no debug build, no Marionette.
+
+Protocol (Firefox native messaging, stdio, length-prefixed JSON):
+  helper -> addon :
+    {"type":"hello","mutable":bool,"output":"<device>"}     on connect
+    {"type":"ad","mode":"system"}                           ad detected, helper muted output itself
+    {"type":"ad","mode":"manual"}                           ad detected, addon must mute <video> + show button
+    {"type":"content"}                                      content back (system mode auto-unmute done)
+    {"type":"status","state":"CONTENT|AD","var":..,"band":..}  periodic telemetry (popup)
+  addon -> helper :
+    {"cmd":"manual_unmuted"}     user tapped the unmute button (manual mode) -> reset to CONTENT
+    {"cmd":"ping"}               liveness check (helper replies with a status)
+
+Mute strategy is chosen at each mute by the CURRENT output device:
+  * SYSTEM (output supports software mute): helper mutes via `osascript`; tap stays
+    alive so it AUTO-unmutes when the game returns. Addon just shows status.
+  * MANUAL (output ignores software mute — HiTV, AirPlay): helper does NOT mute;
+    it asks the addon to mute the <video> element + show an unmute button. The tap
+    goes deaf (no PCM), so ad-end can't be auto-detected -> user taps to unmute.
+
+On stdin EOF (Firefox closed the port) or SIGTERM, the helper restores audio and exits.
+"""
+import sys, os, json, struct, time, signal, subprocess, threading
+import statistics as st
+from collections import deque
+
+# ---- detection thresholds (kept in lock-step with admon.py / FINDINGS-audio.md) ----
+WINDOW_S = 5.0
+# --- crowd-bed detection (matches the proven prototype admon.py EXACTLY) ---
+# Live sport carries a continuous crowd bed → high crowd-band fraction; ads drop it AND
+# raise loudness variance. Fixed dual-gate: band below AD_BAND *and* var above AD_VAR = ad.
+# This is the rule validated live on FRA-SEN and re-confirmed live 2026-06-17 (caught the
+# ad, real SYSTEM mute fired). The adaptive-baseline variant regressed (stricter 0.62 cap,
+# dropped var, missed speech ads) so we reverted to the prototype's exact rule.
+AD_BAND  = 0.64      # crowd bed clearly gone (ad). ads ~0.42-0.60; 2nd-half game ~0.70
+AD_VAR   = 50.0      # AND dynamic (loudness variance high during ads)
+OK_BAND  = 0.68      # crowd bed reasonably back => content (SYSTEM-mode auto-unmute)
+ENTER_S  = 1.5
+EXIT_S   = 6.0
+DB_FLOOR = -60.0     # clamp silence (tapmon emits ~-240 dB) so it can't inflate loudness var.
+                     # No-op on the live continuous stream; only removes the silence artifact.
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+TAPMON = os.environ.get("ADMUTE_TAPMON", os.path.join(HERE, "tapmon"))
+
+# --- debug/calibration: written every status tick to /tmp/admute-detector.log ---
+DEBUG_LOG = os.environ.get("ADMUTE_DEBUG_LOG", "/tmp/admute-detector.log")
+OBSERVE_FLAG = "/tmp/admute-observe"   # if present: classify+log but NEVER mute (calibration)
+def observe_only():
+    return os.path.exists(OBSERVE_FLAG)
+def dlog(s):
+    try:
+        with open(DEBUG_LOG, "a") as f:
+            f.write(s + "\n")
+    except Exception:
+        pass
+
+# ---------- native messaging framing ----------
+_send_lock = threading.Lock()
+def send(msg):
+    data = json.dumps(msg).encode("utf-8")
+    with _send_lock:
+        try:
+            sys.stdout.buffer.write(struct.pack("<I", len(data)))
+            sys.stdout.buffer.write(data)
+            sys.stdout.buffer.flush()
+        except (BrokenPipeError, ValueError):
+            os._exit(0)            # addon went away
+
+# ---------- output-device capability ----------
+def output_muted_state():
+    r = subprocess.run(["osascript", "-e", "output muted of (get volume settings)"],
+                       capture_output=True, text=True)
+    return r.stdout.strip()        # "true" | "false" | "missing value"
+
+_FORCE_MUTABLE = os.environ.get("ADMUTE_FORCE_MUTABLE")   # tests/debug: "1"/"0" overrides probe
+def output_mutable():
+    if _FORCE_MUTABLE is not None:
+        return _FORCE_MUTABLE == "1"
+    return output_muted_state() != "missing value"
+
+DRYRUN = os.environ.get("ADMUTE_DRYRUN") == "1"   # tests: don't actually touch system mute
+def sys_set_muted(m):
+    if DRYRUN:
+        return
+    subprocess.run(["osascript", "-e", f"set volume output muted {'true' if m else 'false'}"],
+                   capture_output=True)
+
+def current_output():
+    try:
+        return subprocess.run(["SwitchAudioSource", "-c"], capture_output=True,
+                              text=True).stdout.strip()
+    except Exception:
+        return "?"
+
+# ---------- shared state ----------
+state = "CONTENT"          # CONTENT | AD
+muted = False
+mute_mode = None           # 'system' | 'manual'
+_state_lock = threading.Lock()
+
+def do_mute():
+    """Mute using the strategy for the current output device. Returns the mode."""
+    global muted, mute_mode
+    would = "system" if output_mutable() else "manual"
+    if observe_only():
+        dlog(f"  >>> WOULD MUTE (mode={would}) [observe: suppressed]")
+        return would          # classify only; no side effects, no addon signal
+    if would == "system":
+        mute_mode = "system"; sys_set_muted(True); muted = True
+        send({"type": "ad", "mode": "system"})
+    else:
+        mute_mode = "manual"; muted = True   # addon mutes the <video>; we just signal
+        send({"type": "ad", "mode": "manual"})
+    return mute_mode
+
+def do_unmute(notify=True):
+    global muted, mute_mode
+    if observe_only():
+        dlog("  >>> WOULD UNMUTE [observe: suppressed]")
+        return
+    if mute_mode == "system":
+        sys_set_muted(False)
+    # manual mode: the addon owns the <video> mute; nothing to undo here
+    muted = False; mute_mode = None
+    if notify:
+        send({"type": "content"})
+
+def restore_and_exit(*_):
+    try: sys_set_muted(False)
+    except Exception: pass
+    os._exit(0)
+
+# ---------- addon -> helper command reader (runs on its own thread) ----------
+def read_commands():
+    while True:
+        hdr = sys.stdin.buffer.read(4)
+        if len(hdr) < 4:                       # EOF: Firefox closed the port
+            restore_and_exit()
+        n = struct.unpack("<I", hdr)[0]
+        body = sys.stdin.buffer.read(n)
+        try:
+            msg = json.loads(body)
+        except Exception:
+            continue
+        cmd = msg.get("cmd")
+        if cmd == "manual_unmuted":
+            with _state_lock:
+                _reset_to_content()
+        elif cmd == "ping":
+            with _state_lock:
+                send({"type": "status", "state": state, "muted": muted,
+                      "mode": mute_mode, "mutable": output_mutable(),
+                      "output": current_output()})
+
+def _reset_to_content():
+    """Force back to CONTENT (e.g. user tapped unmute in manual mode)."""
+    global state, _ad_since, _content_since
+    if muted:
+        do_unmute(notify=False)
+    state = "CONTENT"; _ad_since = _content_since = None
+
+# ---------- detection loop (main thread, reads tapmon) ----------
+_ad_since = _content_since = None
+
+def main():
+    global state, _ad_since, _content_since
+    signal.signal(signal.SIGINT, restore_and_exit)
+    signal.signal(signal.SIGTERM, restore_and_exit)
+
+    send({"type": "hello", "mutable": output_mutable(), "output": current_output()})
+
+    if not os.path.exists(TAPMON):
+        send({"type": "error", "msg": f"tapmon not found at {TAPMON}"})
+        restore_and_exit()
+
+    threading.Thread(target=read_commands, daemon=True).start()
+
+    proc = subprocess.Popen([TAPMON], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                            text=True, bufsize=1)
+
+    win = deque()
+    last_status = 0.0
+    for line in proc.stdout:
+        p = line.split()
+        if len(p) != 3:
+            continue
+        try:
+            ts_ms, db, band = int(p[0]), float(p[1]), float(p[2])
+        except ValueError:
+            continue
+        # Floor dB: tapmon emits ~-240 dB on silence; mixing that into the loudness
+        # variance window makes var explode on silence gaps (highlight cuts, ad/content
+        # boundaries). The live continuous stream never dips near this floor, so this is
+        # a no-op there and only removes the silence artifact.
+        if db < DB_FLOOR:
+            db = DB_FLOOR
+        t = ts_ms / 1000.0
+        win.append((t, db, band))
+        while win and win[0][0] < t - WINDOW_S:
+            win.popleft()
+        if len(win) < 20:
+            continue
+        dbs = [d for _, d, _ in win]
+        bands = [b for _, _, b in win if b >= 0]
+        var = st.pvariance(dbs)
+        bmean = st.mean(bands) if bands else 1.0
+
+        with _state_lock:
+            # MANUAL mode while in an ad: tap is deaf (video muted) -> wait for the
+            # addon's manual_unmuted command, ignore the (silent) audio signal.
+            if state == "AD" and mute_mode == "manual":
+                if t - last_status >= 1.0:
+                    send({"type": "status", "state": state, "muted": muted,
+                          "mode": mute_mode, "var": round(var, 1), "band": round(bmean, 2)})
+                    last_status = t
+                continue
+
+            # Prototype's exact fixed dual-gate: band below AD_BAND AND var above AD_VAR
+            # = ad; band above OK_BAND = content. Silence gives bmean≈1.0 (>OK_BAND) so it
+            # reads as content and never mutes — no separate silence guard needed.
+            ad_like = (bmean < AD_BAND) and (var > AD_VAR)
+            content_like = (bmean > OK_BAND)
+            if ad_like:
+                _content_since = None; _ad_since = _ad_since or t
+            elif content_like:
+                _ad_since = None; _content_since = _content_since or t
+            else:
+                _content_since = None
+
+            if state == "CONTENT" and _ad_since and (t - _ad_since) >= ENTER_S:
+                state = "AD"
+                dlog(f"[{t:7.1f}s] ==> AD (band={bmean:.3f}<{AD_BAND} var={var:.1f}>{AD_VAR})")
+                do_mute()
+            elif (state == "AD" and mute_mode != "manual"
+                  and _content_since and (t - _content_since) >= EXIT_S):
+                state = "CONTENT"
+                dlog(f"[{t:7.1f}s] ==> CONTENT (band={bmean:.3f}>{OK_BAND})"); do_unmute()
+
+            if t - last_status >= 1.0:
+                send({"type": "status", "state": state, "muted": muted, "mode": mute_mode,
+                      "var": round(var, 1), "band": round(bmean, 2)})
+                dlog(f"[{t:7.1f}s] {state:7} band={bmean:.3f} var={var:6.1f} "
+                     f"adlike={ad_like} ok={content_like}")
+                last_status = t
+
+    restore_and_exit()
+
+if __name__ == "__main__":
+    main()

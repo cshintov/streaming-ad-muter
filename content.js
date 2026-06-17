@@ -310,6 +310,43 @@ async function startCountdown(durationSeconds) {
 }
 
 // Listen for messages from background script
+// Audio-detection MANUAL mode ------------------------------------------------
+// When the output device can't be software-muted (HiTV wall presenter, AirPlay),
+// the only mute point is the <video> element itself. Muting it silences the page,
+// but it also makes the system-audio tap go deaf — so the detector can't see the
+// game return. We therefore mute the video AND show an unmute button the user taps
+// when play resumes (which tells the background to reset the detector).
+const AUDIO_UNMUTE_BTN_ID = '__admuteAudioUnmuteBtn';
+
+function audioMuteVideoShowButton() {
+  const v = document.querySelector('video');
+  if (v) v.muted = true;
+  let b = document.getElementById(AUDIO_UNMUTE_BTN_ID);
+  if (!b) {
+    b = el('button', {
+      id: AUDIO_UNMUTE_BTN_ID,
+      style: 'position:fixed;z-index:2147483647;bottom:26px;left:50%;' +
+        'transform:translateX(-50%);padding:15px 24px;font:600 17px system-ui,sans-serif;' +
+        'background:#e50914;color:#fff;border:none;border-radius:11px;' +
+        'box-shadow:0 6px 22px rgba(0,0,0,.55);cursor:pointer;',
+      text: '🔇 Ad muted — tap when the game is back'
+    });
+    b.addEventListener('click', () => {
+      audioUnmuteVideoHideButton();
+      browser.runtime.sendMessage({ action: 'audioAdUnmute' }).catch(() => {});
+    });
+    (document.body || document.documentElement).appendChild(b);
+  }
+  b.style.display = 'block';
+}
+
+function audioUnmuteVideoHideButton() {
+  const v = document.querySelector('video');
+  if (v) v.muted = false;
+  const b = document.getElementById(AUDIO_UNMUTE_BTN_ID);
+  if (b) b.style.display = 'none';
+}
+
 browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
   if (message.action === 'startCountdown') {
     await startCountdown(message.duration);
@@ -319,6 +356,10 @@ browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     await createAdOverlay();
   } else if (message.action === 'hideOverlay') {
     hideOverlay();
+  } else if (message.action === 'audioAdMuteVideo') {
+    audioMuteVideoShowButton();
+  } else if (message.action === 'audioAdUnmuteVideo') {
+    audioUnmuteVideoHideButton();
   }
 });
 

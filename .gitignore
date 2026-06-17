@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Compiled Core Audio capturer (built by native/install.sh from tapmon.swift)
+native/tapmon

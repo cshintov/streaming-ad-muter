@@ -73,11 +73,31 @@ Automatic cleanup occurs when:
 2. Grant necessary permissions for tab access and network monitoring
 3. Start watching Hotstar - ads will be automatically muted
 
+## Audio Ad Detection (beta, macOS only)
+
+Some live streams (e.g. Zee5 cricket) splice ads directly into the video with no DOM
+overlay or distinct ad-pod network request, so the DOM/network detectors above can't see
+them. The optional audio detector catches these by listening to the system audio output
+and muting when the crowd-bed audio characteristic of live sport drops out (an ad).
+
+This needs a small **native helper** that the AMO `.xpi` cannot bundle — install it
+separately (one time, macOS 14.4+):
+
+```sh
+cd native && ./install.sh
+```
+
+It compiles the Core Audio capturer (`tapmon`) from `tapmon.swift` and registers the
+native-messaging host. Then enable **"Audio ad detection (beta)"** in the popup. Remove
+with `./install.sh remove`. The helper captures system audio locally only — nothing leaves
+the machine.
+
 ## Permissions Required
 
 - `webRequest`: To monitor network requests for ad detection
 - `tabs`: To control tab muting
 - `storage`: To persist extension settings
+- `nativeMessaging`: To talk to the optional audio-detection helper (see above)
 - Host permissions for Hotstar domains
 
 ## Development

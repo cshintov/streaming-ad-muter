@@ -1,14 +1,15 @@
 {
   "manifest_version": 2,
   "name": "Streaming Ad Muter",
-  "version": "1.10",
+  "version": "1.11",
   "description": "Automatically mutes ads on Hotstar, SonyLIV and Zee5",
   "permissions": [
     "webRequest",
     "webRequestBlocking",
     "<all_urls>",
     "tabs",
-    "storage"
+    "storage",
+    "nativeMessaging"
   ],
   "background": {
     "scripts": ["background.js"],

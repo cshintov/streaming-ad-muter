@@ -210,7 +210,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // Load settings
-    const result = await browser.storage.local.get(['debugEnabled', 'overlayMode', 'openRouterKey']);
+    const result = await browser.storage.local.get(['debugEnabled', 'overlayMode', 'openRouterKey', 'audioDetectEnabled']);
     const debugToggle = document.getElementById('debugToggle');
     debugToggle.checked = result.debugEnabled || false;
     
@@ -244,11 +244,49 @@ document.addEventListener('DOMContentLoaded', async () => {
     debugToggle.addEventListener('change', async (e) => {
       await browser.storage.local.set({ debugEnabled: e.target.checked });
       // Notify background script of debug state change
-      browser.runtime.sendMessage({ 
-        action: 'setDebug', 
-        enabled: e.target.checked 
+      browser.runtime.sendMessage({
+        action: 'setDebug',
+        enabled: e.target.checked
       });
     });
+
+    // Audio ad detection (native helper) ----------------------------------
+    const audioToggle = document.getElementById('audioDetectToggle');
+    const audioStatusEl = document.getElementById('audioStatus');
+    audioToggle.checked = result.audioDetectEnabled || false;
+
+    function renderAudioStatus(s) {
+      if (!s || !s.enabled) { audioStatusEl.textContent = 'Off'; return; }
+      if (s.error && !s.connected) {
+        audioStatusEl.innerHTML = '⚠️ Helper not reachable. Run <code>native/install.sh</code> once.';
+        return;
+      }
+      if (!s.connected) { audioStatusEl.textContent = 'Connecting…'; return; }
+      const out = s.output ? ` · ${s.output}` : '';
+      if (s.muted) {
+        audioStatusEl.textContent = s.mode === 'manual'
+          ? `🔇 Ad muted (tap the on-screen button when play resumes)${out}`
+          : `🔇 Ad muted — auto-unmutes when the game returns${out}`;
+      } else {
+        const mute = s.mutable === false ? 'manual mute (non-mutable output)' : 'auto-mute';
+        audioStatusEl.textContent = `🎧 Listening · ${mute}${out}`;
+      }
+    }
+
+    async function pollAudioStatus() {
+      try {
+        const s = await browser.runtime.sendMessage({ action: 'getAudioStatus' });
+        renderAudioStatus(s);
+      } catch (e) { /* background asleep */ }
+    }
+
+    audioToggle.addEventListener('change', async (e) => {
+      await browser.runtime.sendMessage({ action: 'setAudioDetect', enabled: e.target.checked });
+      setTimeout(pollAudioStatus, 300);
+    });
+
+    pollAudioStatus();
+    setInterval(pollAudioStatus, 1500);   // live status while the popup is open
 
     // Handle overlay mode changes
     document.querySelectorAll('input[name="overlayMode"]').forEach(radio => {

@@ -517,11 +517,124 @@ function zee5PodSegmentSeen(tabId) {
   }, ZEE5_NET_WATCHDOG_MS);
 }
 
+// ===== Audio-based ad detection (native-messaging helper) =====
+// Stitched / server-side ads have no DOM, no pod request, no metadata — invisible
+// to the browser. The only signal left is the audio itself (live sport carries a
+// continuous crowd bed; ads don't). System audio can't be captured from inside the
+// addon sandbox, so a native helper (native/admute-detector) does the capture +
+// detection and talks to us over a native-messaging port. Works with stock Firefox.
+//
+//   SYSTEM-mutable output → helper mutes the output device itself & auto-unmutes.
+//   Non-mutable output (HiTV/AirPlay) → helper asks us to mute the <video> + show
+//   an unmute button (the tap goes deaf once muted, so the user taps to resume).
+const AUDIO_HOST = 'com.devopsbytes.admute';
+let audioPort = null;
+let audioReconnectTimer = null;
+const audioState = {
+  enabled: false, connected: false, state: 'CONTENT', mode: null, muted: false,
+  mutable: null, output: null, band: null, var: null, error: null
+};
+
+async function audioActiveStreamTab() {
+  const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+  const t = tabs[0];
+  if (!t || !t.url) return null;
+  try {
+    if (/(^|\.)(hotstar|sonyliv|zee5)\.com$/.test(new URL(t.url).hostname)) return t.id;
+  } catch (e) {}
+  return null;
+}
+
+async function audioClearManualMute() {
+  const tabId = await audioActiveStreamTab();
+  if (tabId != null) browser.tabs.sendMessage(tabId, { action: 'audioAdUnmuteVideo' }).catch(() => {});
+}
+
+function audioConnect() {
+  if (audioPort) return;
+  try {
+    audioPort = browser.runtime.connectNative(AUDIO_HOST);
+  } catch (e) {
+    audioState.connected = false; audioState.error = String(e);
+    console.error('[AdMute] native connect failed:', e);
+    return;
+  }
+  audioState.connected = true; audioState.error = null;
+  audioPort.onMessage.addListener(onAudioMessage);
+  audioPort.onDisconnect.addListener(() => {
+    const err = browser.runtime.lastError;
+    console.log('[AdMute] audio detector disconnected', err ? '(' + err.message + ')' : '');
+    audioPort = null;
+    Object.assign(audioState, { connected: false, state: 'CONTENT', mode: null, muted: false });
+    if (err) audioState.error = err.message;
+    // Helper crash while still enabled → reconnect with a short backoff.
+    if (audioState.enabled && !audioReconnectTimer) {
+      audioReconnectTimer = setTimeout(() => {
+        audioReconnectTimer = null;
+        if (audioState.enabled) audioConnect();
+      }, 3000);
+    }
+  });
+}
+
+function audioDisconnect() {
+  if (audioReconnectTimer) { clearTimeout(audioReconnectTimer); audioReconnectTimer = null; }
+  const wasManualMuted = audioState.mode === 'manual' && audioState.muted;
+  if (audioPort) { try { audioPort.disconnect(); } catch (e) {} audioPort = null; }
+  Object.assign(audioState, { connected: false, state: 'CONTENT', mode: null, muted: false });
+  if (wasManualMuted) audioClearManualMute();   // helper exit unmutes system, but not the <video>
+}
+
+async function onAudioMessage(msg) {
+  if (!msg || !msg.type) return;
+  if (msg.type === 'hello') {
+    audioState.mutable = msg.mutable; audioState.output = msg.output;
+    console.log('[AdMute] audio detector ready; output=', msg.output, 'mutable=', msg.mutable);
+  } else if (msg.type === 'ad') {
+    Object.assign(audioState, { state: 'AD', mode: msg.mode, muted: true });
+    logZee5Event(null, '🔊 audio AD (' + msg.mode + ')');
+    if (msg.mode === 'manual') {
+      const tabId = await audioActiveStreamTab();
+      if (tabId != null) browser.tabs.sendMessage(tabId, { action: 'audioAdMuteVideo' }).catch(() => {});
+    }
+    // system mode: helper already muted the output device — nothing for us to do.
+  } else if (msg.type === 'content') {
+    Object.assign(audioState, { state: 'CONTENT', mode: null, muted: false });
+  } else if (msg.type === 'status') {
+    if (msg.state) audioState.state = msg.state;
+    audioState.muted = !!msg.muted; audioState.mode = msg.mode || null;
+    if (msg.var != null) audioState.var = msg.var;
+    if (msg.band != null) audioState.band = msg.band;
+    if (msg.mutable != null) audioState.mutable = msg.mutable;
+    if (msg.output) audioState.output = msg.output;
+  } else if (msg.type === 'error') {
+    audioState.error = msg.msg; console.error('[AdMute] audio detector error:', msg.msg);
+  }
+}
+
+// User tapped the on-page unmute button (manual mode): reset helper + local state.
+function audioManualUnmuted() {
+  if (audioPort) { try { audioPort.postMessage({ cmd: 'manual_unmuted' }); } catch (e) {} }
+  Object.assign(audioState, { state: 'CONTENT', mode: null, muted: false });
+}
+
+async function setAudioDetectEnabled(enabled) {
+  audioState.enabled = enabled;
+  await browser.storage.local.set({ audioDetectEnabled: enabled });
+  if (enabled) audioConnect(); else audioDisconnect();
+}
+
 // Initialize debug state on startup
-browser.storage.local.get(['debugEnabled']).then((result) => {
+browser.storage.local.get(['debugEnabled', 'audioDetectEnabled']).then((result) => {
   debugEnabled = result.debugEnabled || false;
   console.log('[AdMute] Extension loaded - Debug mode:', debugEnabled ? 'enabled' : 'disabled');
-  
+
+  // Re-open the audio-detector native port if the user had it enabled.
+  if (result.audioDetectEnabled) {
+    audioState.enabled = true;
+    audioConnect();
+  }
+
   // Initialize and check fact library
   manageFactLibrary();
   
@@ -1153,6 +1266,14 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   } else if (message.action === 'zee5AdEnd') {
     handleZee5AdEnd(sender.tab && sender.tab.id);
+    return false;
+  } else if (message.action === 'setAudioDetect') {
+    return setAudioDetectEnabled(!!message.enabled).then(() => ({ ok: true }));
+  } else if (message.action === 'getAudioStatus') {
+    return Promise.resolve(audioState);
+  } else if (message.action === 'audioAdUnmute') {
+    // on-page unmute button tapped (manual mode)
+    audioManualUnmuted();
     return false;
   } else if (message.action === 'getContent') {
     return getEducationalContent(); // Return promise for async response
