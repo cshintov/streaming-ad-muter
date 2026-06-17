@@ -32,7 +32,10 @@
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "streaming-ad-muter@devopsbytes.com"
+      "id": "streaming-ad-muter@devopsbytes.com",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
     }
   }
 }
