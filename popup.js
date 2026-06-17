@@ -257,6 +257,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function renderAudioStatus(s) {
       if (!s || !s.enabled) { audioStatusEl.textContent = 'Off'; return; }
+      if (!s.onZee5) { audioStatusEl.textContent = '💤 Active only on Zee5 — open a Zee5 stream'; return; }
       if (s.error && !s.connected) {
         audioStatusEl.innerHTML = '⚠️ Helper not reachable. Run <code>native/install.sh</code> once.';
         return;

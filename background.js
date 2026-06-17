@@ -517,7 +517,7 @@ function zee5PodSegmentSeen(tabId) {
   }, ZEE5_NET_WATCHDOG_MS);
 }
 
-// ===== Audio-based ad detection (native-messaging helper) =====
+// ===== Audio-based ad detection (native-messaging helper) — ZEE5 ONLY =====
 // Stitched / server-side ads have no DOM, no pod request, no metadata — invisible
 // to the browser. The only signal left is the audio itself (live sport carries a
 // continuous crowd bed; ads don't). System audio can't be captured from inside the
@@ -527,13 +527,29 @@ function zee5PodSegmentSeen(tabId) {
 //   SYSTEM-mutable output → helper mutes the output device itself & auto-unmutes.
 //   Non-mutable output (HiTV/AirPlay) → helper asks us to mute the <video> + show
 //   an unmute button (the tap goes deaf once muted, so the user taps to resume).
+//
+// Scope: Hotstar/SonyLIV ads are caught precisely by the DOM+network detectors
+// above (per-tab mute). The audio tap is a heuristic that captures the WHOLE system
+// output and mutes the output device — we don't want it second-guessing those sites
+// or muting unrelated tabs. So the helper is connected ONLY while the active tab is
+// Zee5, and torn down the moment we leave it.
 const AUDIO_HOST = 'com.devopsbytes.admute';
 let audioPort = null;
 let audioReconnectTimer = null;
 const audioState = {
-  enabled: false, connected: false, state: 'CONTENT', mode: null, muted: false,
+  enabled: false, connected: false, onZee5: false, state: 'CONTENT', mode: null, muted: false,
   mutable: null, output: null, band: null, var: null, error: null
 };
+
+function isZee5Host(url) {
+  try { return /(^|\.)zee5\.com$/.test(new URL(url).hostname); } catch (e) { return false; }
+}
+
+async function audioActiveTabIsZee5() {
+  const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+  const t = tabs[0];
+  return !!(t && t.url && isZee5Host(t.url));
+}
 
 async function audioActiveStreamTab() {
   const tabs = await browser.tabs.query({ active: true, currentWindow: true });
@@ -543,6 +559,16 @@ async function audioActiveStreamTab() {
     if (/(^|\.)(hotstar|sonyliv|zee5)\.com$/.test(new URL(t.url).hostname)) return t.id;
   } catch (e) {}
   return null;
+}
+
+// Connect the helper only when audio detection is enabled AND the active tab is
+// Zee5; otherwise make sure it's torn down. Idempotent — safe to call on every tab
+// switch, navigation, or focus change.
+async function audioReconcile() {
+  if (!audioState.enabled) { audioState.onZee5 = false; audioDisconnect(); return; }
+  const onZee5 = await audioActiveTabIsZee5();
+  audioState.onZee5 = onZee5;
+  if (onZee5) audioConnect(); else audioDisconnect();
 }
 
 async function audioClearManualMute() {
@@ -567,11 +593,12 @@ function audioConnect() {
     audioPort = null;
     Object.assign(audioState, { connected: false, state: 'CONTENT', mode: null, muted: false });
     if (err) audioState.error = err.message;
-    // Helper crash while still enabled → reconnect with a short backoff.
+    // Helper crash while still enabled → reconnect with a short backoff (but only
+    // if we're still on Zee5 — audioReconcile re-checks the active tab).
     if (audioState.enabled && !audioReconnectTimer) {
       audioReconnectTimer = setTimeout(() => {
         audioReconnectTimer = null;
-        if (audioState.enabled) audioConnect();
+        if (audioState.enabled) audioReconcile();
       }, 3000);
     }
   });
@@ -621,7 +648,17 @@ function audioManualUnmuted() {
 async function setAudioDetectEnabled(enabled) {
   audioState.enabled = enabled;
   await browser.storage.local.set({ audioDetectEnabled: enabled });
-  if (enabled) audioConnect(); else audioDisconnect();
+  audioReconcile();   // connects only if we're on Zee5; disconnects otherwise
+}
+
+// Keep the helper scoped to Zee5: re-evaluate whenever the active tab changes, a
+// tab navigates, or window focus moves between windows.
+browser.tabs.onActivated.addListener(() => audioReconcile());
+browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.url || changeInfo.status === 'complete') audioReconcile();
+});
+if (browser.windows && browser.windows.onFocusChanged) {
+  browser.windows.onFocusChanged.addListener(() => audioReconcile());
 }
 
 // Initialize debug state on startup
@@ -629,10 +666,11 @@ browser.storage.local.get(['debugEnabled', 'audioDetectEnabled']).then((result) 
   debugEnabled = result.debugEnabled || false;
   console.log('[AdMute] Extension loaded - Debug mode:', debugEnabled ? 'enabled' : 'disabled');
 
-  // Re-open the audio-detector native port if the user had it enabled.
+  // Re-open the audio-detector native port if the user had it enabled — but only
+  // once we confirm the active tab is Zee5 (audioReconcile does the check).
   if (result.audioDetectEnabled) {
     audioState.enabled = true;
-    audioConnect();
+    audioReconcile();
   }
 
   // Initialize and check fact library

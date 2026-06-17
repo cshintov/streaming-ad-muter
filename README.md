@@ -75,10 +75,15 @@ Automatic cleanup occurs when:
 
 ## Audio Ad Detection (beta, macOS only)
 
-Some live streams (e.g. Zee5 cricket) splice ads directly into the video with no DOM
-overlay or distinct ad-pod network request, so the DOM/network detectors above can't see
-them. The optional audio detector catches these by listening to the system audio output
-and muting when the crowd-bed audio characteristic of live sport drops out (an ad).
+Zee5 live cricket splices ads directly into the video with no DOM overlay or distinct
+ad-pod network request, so the DOM/network detectors above can't see them. The optional
+audio detector catches these by listening to the system audio output and muting when the
+crowd-bed audio characteristic of live sport drops out (an ad).
+
+This detector is **scoped to Zee5 only** — it connects the native helper only while a
+Zee5 stream is the active tab and disconnects on any tab switch or navigation. Hotstar
+and SonyLIV are handled entirely by the precise DOM/network detectors above, so the
+system-audio heuristic never engages there (or on any other tab).
 
 This needs a small **native helper** that the AMO `.xpi` cannot bundle (native-messaging
 hosts are OS-level executables, registered outside the extension sandbox). There is **no
