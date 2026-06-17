@@ -80,17 +80,26 @@ overlay or distinct ad-pod network request, so the DOM/network detectors above c
 them. The optional audio detector catches these by listening to the system audio output
 and muting when the crowd-bed audio characteristic of live sport drops out (an ad).
 
-This needs a small **native helper** that the AMO `.xpi` cannot bundle — install it
-separately (one time, macOS 14.4+):
+This needs a small **native helper** that the AMO `.xpi` cannot bundle (native-messaging
+hosts are OS-level executables, registered outside the extension sandbox). There is **no
+prebuilt or signed installer** — it's a do-it-yourself, build-from-source step for advanced
+users.
+
+**Requirements:** macOS 14.4+ and the **Xcode command line tools** (`xcode-select --install`,
+provides `swiftc`).
 
 ```sh
-cd native && ./install.sh
+git clone https://github.com/cshintov/streaming-ad-muter
+cd streaming-ad-muter/native && ./install.sh
 ```
 
-It compiles the Core Audio capturer (`tapmon`) from `tapmon.swift` and registers the
-native-messaging host. Then enable **"Audio ad detection (beta)"** in the popup. Remove
-with `./install.sh remove`. The helper captures system audio locally only — nothing leaves
-the machine.
+`install.sh` compiles the Core Audio capturer (`tapmon`) from `tapmon.swift` and registers
+the native-messaging host manifest under
+`~/Library/Application Support/Mozilla/NativeMessagingHosts/`. Then enable **"Audio ad
+detection (beta)"** in the popup. Uninstall with `./install.sh remove`.
+
+The helper analyses system audio **locally only** — nothing is stored or transmitted, and
+the extension itself never receives audio, only mute/unmute signals.
 
 ## Permissions Required
 
